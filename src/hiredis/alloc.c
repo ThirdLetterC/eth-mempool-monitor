@@ -31,14 +31,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(HIREDIS_USE_MIMALLOC)
+#include <mimalloc.h>
+#endif
+
 #include "hiredis/alloc.h"
 
+#if defined(HIREDIS_USE_MIMALLOC)
+#define HIREDIS_MALLOC_IMPL mi_malloc
+#define HIREDIS_CALLOC_IMPL mi_calloc
+#define HIREDIS_REALLOC_IMPL mi_realloc
+#define HIREDIS_STRDUP_IMPL mi_strdup
+#define HIREDIS_FREE_IMPL mi_free
+#else
+#define HIREDIS_MALLOC_IMPL malloc
+#define HIREDIS_CALLOC_IMPL calloc
+#define HIREDIS_REALLOC_IMPL realloc
+#define HIREDIS_STRDUP_IMPL strdup
+#define HIREDIS_FREE_IMPL free
+#endif
+
 hiredisAllocFuncs hiredisAllocFns = {
-    .mallocFn = malloc,
-    .callocFn = calloc,
-    .reallocFn = realloc,
-    .strdupFn = strdup,
-    .freeFn = free,
+    .mallocFn = HIREDIS_MALLOC_IMPL,
+    .callocFn = HIREDIS_CALLOC_IMPL,
+    .reallocFn = HIREDIS_REALLOC_IMPL,
+    .strdupFn = HIREDIS_STRDUP_IMPL,
+    .freeFn = HIREDIS_FREE_IMPL,
 };
 
 /* Override hiredis' allocators with ones supplied by the user */
@@ -53,10 +71,10 @@ hiredisAllocFuncs hiredisSetAllocators(hiredisAllocFuncs *override) {
 /* Reset allocators to use libc defaults */
 void hiredisResetAllocators() {
   hiredisAllocFns = (hiredisAllocFuncs){
-      .mallocFn = malloc,
-      .callocFn = calloc,
-      .reallocFn = realloc,
-      .strdupFn = strdup,
-      .freeFn = free,
+      .mallocFn = HIREDIS_MALLOC_IMPL,
+      .callocFn = HIREDIS_CALLOC_IMPL,
+      .reallocFn = HIREDIS_REALLOC_IMPL,
+      .strdupFn = HIREDIS_STRDUP_IMPL,
+      .freeFn = HIREDIS_FREE_IMPL,
   };
 }

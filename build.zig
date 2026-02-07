@@ -59,11 +59,19 @@ pub fn build(b: *std.Build) void {
         "-Werror",
         "-DULOG_BUILD_DYNAMIC_CONFIG=1",
     };
-    const hiredis_c_flags = &[_][]const u8{
-        "-std=c23",
-        "-D_DEFAULT_SOURCE",
-        "-D_POSIX_C_SOURCE=200809L",
-    };
+    const hiredis_c_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE",
+            "-D_POSIX_C_SOURCE=200809L",
+            "-DHIREDIS_USE_MIMALLOC=1",
+        }
+    else
+        &[_][]const u8{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE",
+            "-D_POSIX_C_SOURCE=200809L",
+        };
     const rabbitmq_c_flags = &[_][]const u8{
         "-std=c23",
         "-D_DEFAULT_SOURCE",
