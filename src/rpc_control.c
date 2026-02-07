@@ -19,6 +19,10 @@
 #include "toml/toml.h"
 #include "ulog/ulog.h"
 
+#if defined(USE_MIMALLOC)
+#include <mimalloc.h>
+#endif
+
 constexpr int32_t RPC_CONTROL_DEFAULT_PORT = 8080;
 constexpr char RPC_CONTROL_DEFAULT_HOST[] = "127.0.0.1";
 constexpr int32_t RPC_CONTROL_DEFAULT_BACKLOG = 4096;
@@ -97,6 +101,15 @@ static const char *const RPC_CONTROL_METHOD_NAMES[] = {
     "monitor_count",  "monitor_list",
     "monitor_clear",
 };
+
+static void rpc_control_configure_allocator_overrides() {
+#if defined(USE_MIMALLOC)
+  toml_option_t toml_options = toml_default_option();
+  toml_options.mem_realloc = mi_realloc;
+  toml_options.mem_free = mi_free;
+  toml_set_option(toml_options);
+#endif
+}
 
 static void rpc_control_print_usage(const char *program_name) {
   printf("Usage: %s [options]\n", program_name);
@@ -1830,6 +1843,8 @@ static void rpc_control_on_signal(uv_signal_t *handle, int signum) {
 }
 
 int main(int argc, char **argv) {
+  rpc_control_configure_allocator_overrides();
+
   if (!rpc_control_apply_log_style_defaults()) {
     (void)ulog_cleanup();
     return EXIT_FAILURE;

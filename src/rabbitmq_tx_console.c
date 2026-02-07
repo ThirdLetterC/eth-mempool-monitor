@@ -19,6 +19,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#if defined(USE_MIMALLOC)
+#include <mimalloc.h>
+#endif
+
 typedef struct app_config app_config_t;
 struct app_config {
   const char *rabbitmq_host;
@@ -98,6 +102,16 @@ static volatile sig_atomic_t app_shutdown_signal = 0;
 
 static void app_handle_shutdown_signal(int signal_number) {
   app_shutdown_signal = signal_number;
+}
+
+static void app_configure_allocator_overrides() {
+#if defined(USE_MIMALLOC)
+  toml_option_t toml_options = toml_default_option();
+  toml_options.mem_realloc = mi_realloc;
+  toml_options.mem_free = mi_free;
+  toml_set_option(toml_options);
+  json_set_allocation_functions(mi_malloc, mi_free);
+#endif
 }
 
 [[nodiscard]] static bool app_is_shutdown_requested() {
@@ -1266,6 +1280,8 @@ static void app_handle_payload(const void *body, size_t body_length) {
 }
 
 int main(int argc, char *argv[]) {
+  app_configure_allocator_overrides();
+
   if (!app_apply_log_style_defaults()) {
     (void)ulog_cleanup();
     return EXIT_FAILURE;

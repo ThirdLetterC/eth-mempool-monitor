@@ -44,13 +44,23 @@ pub fn build(b: *std.Build) void {
     const use_sanitizers = enable_sanitizers and optimize == .Debug and target.result.os.tag != .windows;
     const sanitize_c = if (use_sanitizers) std.zig.SanitizeC.full else std.zig.SanitizeC.off;
 
-    const c_flags = &[_][]const u8{
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-Wpedantic",
-        "-Werror",
-    };
+    const c_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-std=c23",
+            "-Wall",
+            "-Wextra",
+            "-Wpedantic",
+            "-Werror",
+            "-DUSE_MIMALLOC=1",
+        }
+    else
+        &[_][]const u8{
+            "-std=c23",
+            "-Wall",
+            "-Wextra",
+            "-Wpedantic",
+            "-Werror",
+        };
     const ulog_c_flags = &[_][]const u8{
         "-std=c23",
         "-Wall",
@@ -78,11 +88,19 @@ pub fn build(b: *std.Build) void {
         "-D_POSIX_C_SOURCE=200809L",
         "-DHAVE_POLL",
     };
-    const jsonrpc_c_flags = &[_][]const u8{
-        "-std=c23",
-        "-D_DEFAULT_SOURCE",
-        "-D_POSIX_C_SOURCE=200809L",
-    };
+    const jsonrpc_c_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE",
+            "-D_POSIX_C_SOURCE=200809L",
+            "-DUSE_MIMALLOC=1",
+        }
+    else
+        &[_][]const u8{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE",
+            "-D_POSIX_C_SOURCE=200809L",
+        };
     const jsonrpc_files = &[_][]const u8{
         "src/jsonrpc/arena.c",
         "src/jsonrpc/jsonrpc.c",

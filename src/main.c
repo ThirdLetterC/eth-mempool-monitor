@@ -1,11 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "websocket-client/subscriber.h"
-
-#include "parg/parg.h"
-#include "toml/toml.h"
-#include "ulog/ulog.h"
-
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
@@ -14,6 +8,17 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+
+#include "websocket-client/subscriber.h"
+
+#include "parg/parg.h"
+#include "parson/parson.h"
+#include "toml/toml.h"
+#include "ulog/ulog.h"
+
+#if defined(USE_MIMALLOC)
+#include <mimalloc.h>
+#endif
 
 typedef struct app_config app_config;
 struct app_config {
@@ -213,6 +218,16 @@ static void app_print_usage(const char *program_name) {
   printf("  rabbitmq.enabled\n");
   printf("  logging.level (trace|debug|info|warn|error|fatal)\n");
   printf("  logging.color (true|false)\n");
+}
+
+static void app_configure_allocator_overrides() {
+#if defined(USE_MIMALLOC)
+  toml_option_t toml_options = toml_default_option();
+  toml_options.mem_realloc = mi_realloc;
+  toml_options.mem_free = mi_free;
+  toml_set_option(toml_options);
+  json_set_allocation_functions(mi_malloc, mi_free);
+#endif
 }
 
 [[nodiscard]] static char *app_string_duplicate(const char *text) {
@@ -926,6 +941,8 @@ app_apply_cli_overrides(app_config *config,
 }
 
 int main(int argc, char *argv[]) {
+  app_configure_allocator_overrides();
+
   if (!app_apply_log_style_defaults()) {
     (void)ulog_cleanup();
     return EXIT_FAILURE;
