@@ -1,0 +1,35 @@
+# Example addresses file for eth-mempool-monitor
+# 
+# This file demonstrates the format for loading addresses into the
+# monitoring system using the Python RPC client's load_addresses_from_file() method.
+#
+# Format:
+# - One Ethereum address per line
+# - Lines starting with # are comments (ignored)
+# - Empty lines are ignored
+# - Leading and trailing whitespace is trimmed
+# - Addresses should be in the format: 0x followed by 40 hexadecimal characters
+#
+# Usage:
+#   python3 load_addresses_example.py example_addresses.txt
+#
+# Or in your own Python code:
+#   from rpc_client import RPCClient
+#   with RPCClient(auth_token='your-token') as client:
+#       result = client.load_addresses_from_file('example_addresses.txt')
+#       print(f"Loaded {len(result.get('added', []))} addresses")
+
+# Example addresses (these are dummy addresses for demonstration)
+0x1111111111111111111111111111111111111111
+0x2222222222222222222222222222222222222222
+0x3333333333333333333333333333333333333333
+
+# You can add comments between addresses
+0x4444444444444444444444444444444444444444
+0x5555555555555555555555555555555555555555
+
+# Addresses can have surrounding whitespace (it will be trimmed automatically)
+  0x6666666666666666666666666666666666666666  
+
+# Add your actual Ethereum addresses below:
+# 0xYourAddressHere...

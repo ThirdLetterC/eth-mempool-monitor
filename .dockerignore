@@ -1,0 +1,11 @@
+.git
+.gitignore
+.zig-cache
+zig-out
+__pycache__
+*.pyc
+*.pyo
+*.swp
+*.swo
+compose.yml
+rabbitmq-data

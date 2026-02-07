@@ -1,0 +1,1260 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include "websocket-client/ws_client.h"
+#include "ulog/ulog.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <netdb.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+#include <wolfssl/options.h>
+#include <wolfssl/openssl/err.h>
+#include <wolfssl/openssl/ssl.h>
+#include <wolfssl/wolfcrypt/ecc.h>
+
+constexpr size_t WS_ERROR_MESSAGE_CAPACITY = 256;
+constexpr size_t WS_HTTP_RESPONSE_CAPACITY = 8 * 1024;
+constexpr size_t WS_MAX_HEADER_VALUE = 256;
+constexpr uint16_t WS_HANDSHAKE_VERSION = 13;
+constexpr uint32_t WS_DEFAULT_READ_TIMEOUT_SECONDS = 5;
+constexpr uint32_t WS_DEFAULT_WRITE_TIMEOUT_SECONDS = 5;
+
+constexpr char WS_ACCEPT_GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+constexpr char WS_BASE64_TABLE[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+struct ws_client {
+  int socket_fd;
+  bool connected;
+  bool use_tls;
+  uint32_t read_timeout_seconds;
+  uint32_t write_timeout_seconds;
+  SSL_CTX *ssl_ctx;
+  SSL *ssl;
+  char last_error[WS_ERROR_MESSAGE_CAPACITY];
+};
+
+typedef struct {
+  uint32_t state[5];
+  uint64_t total_bits;
+  uint8_t block[64];
+  size_t block_length;
+} sha1_ctx_t;
+
+[[nodiscard]] static uint32_t ws_rotl32(uint32_t value, unsigned shift) {
+  return (value << shift) | (value >> (32U - shift));
+}
+
+static void ws_sha1_init(sha1_ctx_t *ctx) {
+  ctx->state[0] = 0x67452301U;
+  ctx->state[1] = 0xEFCDAB89U;
+  ctx->state[2] = 0x98BADCFEU;
+  ctx->state[3] = 0x10325476U;
+  ctx->state[4] = 0xC3D2E1F0U;
+  ctx->total_bits = 0;
+  ctx->block_length = 0;
+}
+
+static void ws_sha1_transform(sha1_ctx_t *ctx, const uint8_t *block) {
+  uint32_t w[80] = {0};
+  for (size_t i = 0; i < 16; ++i) {
+    auto offset = i * 4;
+    w[i] = ((uint32_t)block[offset] << 24U) |
+           ((uint32_t)block[offset + 1] << 16U) |
+           ((uint32_t)block[offset + 2] << 8U) | (uint32_t)block[offset + 3];
+  }
+
+  for (size_t i = 16; i < 80; ++i) {
+    w[i] = ws_rotl32(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1U);
+  }
+
+  auto a = ctx->state[0];
+  auto b = ctx->state[1];
+  auto c = ctx->state[2];
+  auto d = ctx->state[3];
+  auto e = ctx->state[4];
+
+  for (size_t i = 0; i < 80; ++i) {
+    uint32_t f = 0;
+    uint32_t k = 0;
+
+    if (i < 20) {
+      f = (b & c) | ((~b) & d);
+      k = 0x5A827999U;
+    } else if (i < 40) {
+      f = b ^ c ^ d;
+      k = 0x6ED9EBA1U;
+    } else if (i < 60) {
+      f = (b & c) | (b & d) | (c & d);
+      k = 0x8F1BBCDCU;
+    } else {
+      f = b ^ c ^ d;
+      k = 0xCA62C1D6U;
+    }
+
+    auto temp = ws_rotl32(a, 5U) + f + e + k + w[i];
+    e = d;
+    d = c;
+    c = ws_rotl32(b, 30U);
+    b = a;
+    a = temp;
+  }
+
+  ctx->state[0] += a;
+  ctx->state[1] += b;
+  ctx->state[2] += c;
+  ctx->state[3] += d;
+  ctx->state[4] += e;
+}
+
+static void ws_sha1_update(sha1_ctx_t *ctx, const uint8_t *data,
+                           size_t length) {
+  if (length == 0) {
+    return;
+  }
+
+  ctx->total_bits += (uint64_t)length * 8U;
+
+  size_t index = 0;
+  while (index < length) {
+    auto space = sizeof(ctx->block) - ctx->block_length;
+    auto remaining = length - index;
+    auto to_copy = (remaining < space) ? remaining : space;
+
+    memcpy(ctx->block + ctx->block_length, data + index, to_copy);
+    ctx->block_length += to_copy;
+    index += to_copy;
+
+    if (ctx->block_length == sizeof(ctx->block)) {
+      ws_sha1_transform(ctx, ctx->block);
+      ctx->block_length = 0;
+    }
+  }
+}
+
+static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
+  ctx->block[ctx->block_length++] = 0x80U;
+
+  if (ctx->block_length > 56) {
+    while (ctx->block_length < 64) {
+      ctx->block[ctx->block_length++] = 0;
+    }
+    ws_sha1_transform(ctx, ctx->block);
+    ctx->block_length = 0;
+  }
+
+  while (ctx->block_length < 56) {
+    ctx->block[ctx->block_length++] = 0;
+  }
+
+  for (size_t i = 0; i < 8; ++i) {
+    auto shift = (7U - i) * 8U;
+    ctx->block[56 + i] = (uint8_t)((ctx->total_bits >> shift) & 0xFFU);
+  }
+
+  ws_sha1_transform(ctx, ctx->block);
+
+  for (size_t i = 0; i < 5; ++i) {
+    digest[i * 4] = (uint8_t)((ctx->state[i] >> 24U) & 0xFFU);
+    digest[i * 4 + 1] = (uint8_t)((ctx->state[i] >> 16U) & 0xFFU);
+    digest[i * 4 + 2] = (uint8_t)((ctx->state[i] >> 8U) & 0xFFU);
+    digest[i * 4 + 3] = (uint8_t)(ctx->state[i] & 0xFFU);
+  }
+}
+
+[[nodiscard]] static size_t ws_base64_encode(const uint8_t *input,
+                                             size_t input_length, char *output,
+                                             size_t output_capacity) {
+  auto required = ((input_length + 2U) / 3U) * 4U + 1U;
+  if (output_capacity < required) {
+    return 0;
+  }
+
+  size_t src = 0;
+  size_t dst = 0;
+
+  while (src + 2U < input_length) {
+    auto chunk = ((uint32_t)input[src] << 16U) |
+                 ((uint32_t)input[src + 1] << 8U) | (uint32_t)input[src + 2];
+
+    output[dst++] = WS_BASE64_TABLE[(chunk >> 18U) & 0x3FU];
+    output[dst++] = WS_BASE64_TABLE[(chunk >> 12U) & 0x3FU];
+    output[dst++] = WS_BASE64_TABLE[(chunk >> 6U) & 0x3FU];
+    output[dst++] = WS_BASE64_TABLE[chunk & 0x3FU];
+    src += 3;
+  }
+
+  if (src < input_length) {
+    auto chunk = (uint32_t)input[src] << 16U;
+    if (src + 1U < input_length) {
+      chunk |= (uint32_t)input[src + 1] << 8U;
+    }
+
+    output[dst++] = WS_BASE64_TABLE[(chunk >> 18U) & 0x3FU];
+    output[dst++] = WS_BASE64_TABLE[(chunk >> 12U) & 0x3FU];
+
+    if (src + 1U < input_length) {
+      output[dst++] = WS_BASE64_TABLE[(chunk >> 6U) & 0x3FU];
+    } else {
+      output[dst++] = '=';
+    }
+
+    output[dst++] = '=';
+  }
+
+  output[dst] = '\0';
+  return dst;
+}
+
+static void ws_set_error(ws_client_t *client, const char *format, ...) {
+  if (client == nullptr) {
+    return;
+  }
+
+  va_list args;
+  va_start(args, format);
+  (void)vsnprintf(client->last_error, sizeof(client->last_error), format, args);
+  va_end(args);
+  ulog_debug("[ws-client] %s", client->last_error);
+}
+
+[[nodiscard]] static bool ws_errno_is_timeout(int err) {
+  if (err == EAGAIN || err == EWOULDBLOCK) {
+    return true;
+  }
+#ifdef ETIMEDOUT
+  if (err == ETIMEDOUT) {
+    return true;
+  }
+#endif
+  return false;
+}
+
+static void ws_set_transport_read_error(ws_client_t *client,
+                                        const char *context,
+                                        ssize_t transport_result, SSL *ssl,
+                                        bool use_tls,
+                                        uint32_t read_timeout_seconds) {
+  if (client == nullptr || context == nullptr) {
+    return;
+  }
+
+  int saved_errno = errno;
+  if (!use_tls || ssl == nullptr) {
+    if (transport_result == 0) {
+      ws_set_error(client, "%s: connection closed by peer", context);
+      return;
+    }
+
+    if (ws_errno_is_timeout(saved_errno)) {
+      ws_set_error(client, "%s: read timed out after %u seconds", context,
+                   (unsigned)read_timeout_seconds);
+      return;
+    }
+
+    ws_set_error(client, "%s: %s", context, strerror(saved_errno));
+    return;
+  }
+
+  int ssl_error = SSL_get_error(ssl, (int)transport_result);
+  switch (ssl_error) {
+  case SSL_ERROR_ZERO_RETURN:
+    ws_set_error(client, "%s: TLS connection closed by peer", context);
+    return;
+  case SSL_ERROR_WANT_READ:
+    ws_set_error(client, "%s: TLS read timed out after %u seconds", context,
+                 (unsigned)read_timeout_seconds);
+    return;
+  case SSL_ERROR_WANT_WRITE:
+    ws_set_error(client, "%s: TLS write blocked while reading", context);
+    return;
+  case SSL_ERROR_SYSCALL:
+    if (transport_result == 0 || saved_errno == 0) {
+      ws_set_error(client, "%s: TLS connection terminated by peer", context);
+      return;
+    }
+    if (ws_errno_is_timeout(saved_errno)) {
+      ws_set_error(client, "%s: TLS read timed out after %u seconds", context,
+                   (unsigned)read_timeout_seconds);
+      return;
+    }
+    ws_set_error(client, "%s: TLS syscall error: %s", context,
+                 strerror(saved_errno));
+    return;
+  case SSL_ERROR_SSL: {
+    unsigned long ssl_lib_error = ERR_get_error();
+    if (ssl_lib_error == 0) {
+      ws_set_error(client, "%s: TLS protocol error", context);
+      return;
+    }
+    char error_text[128] = {0};
+    ERR_error_string_n(ssl_lib_error, error_text, sizeof(error_text));
+    ws_set_error(client, "%s: TLS protocol error: %s", context, error_text);
+    return;
+  }
+  default:
+    ws_set_error(client, "%s: TLS read failure (SSL_get_error=%d)", context,
+                 ssl_error);
+    return;
+  }
+}
+
+[[nodiscard]] static ssize_t ws_transport_recv(int fd, SSL *ssl, bool use_tls,
+                                               uint8_t *buffer, size_t length) {
+  if (use_tls) {
+    return SSL_read(ssl, buffer, (int)length);
+  }
+
+  return recv(fd, buffer, length, 0);
+}
+
+[[nodiscard]] static ssize_t ws_transport_send(int fd, SSL *ssl, bool use_tls,
+                                               const uint8_t *buffer,
+                                               size_t length) {
+  if (use_tls) {
+    auto sent = SSL_write(ssl, buffer, (int)length);
+    return (sent > 0) ? sent : -1;
+  }
+
+#ifdef MSG_NOSIGNAL
+  return send(fd, buffer, length, MSG_NOSIGNAL);
+#else
+  return send(fd, buffer, length, 0);
+#endif
+}
+
+[[nodiscard]] static bool ws_read_exact(ws_client_t *client, uint8_t *buffer,
+                                        size_t length, const char *context) {
+  if (client == nullptr || buffer == nullptr || context == nullptr) {
+    return false;
+  }
+
+  ulog_trace("[ws-client] read_exact context=\"%s\" bytes=%zu", context,
+             length);
+  size_t total = 0;
+  while (total < length) {
+    auto received =
+        ws_transport_recv(client->socket_fd, client->ssl, client->use_tls,
+                          buffer + total, length - total);
+    if (received <= 0) {
+      ws_set_transport_read_error(client, context, received, client->ssl,
+                                  client->use_tls,
+                                  client->read_timeout_seconds);
+      return false;
+    }
+    total += (size_t)received;
+  }
+  ulog_trace("[ws-client] read_exact complete context=\"%s\" bytes=%zu",
+             context, length);
+  return true;
+}
+
+[[nodiscard]] static bool ws_send_all(int fd, SSL *ssl, bool use_tls,
+                                      const uint8_t *buffer, size_t length) {
+  ulog_trace("[ws-client] send_all tls=%s bytes=%zu",
+             use_tls ? "true" : "false", length);
+  size_t total = 0;
+  while (total < length) {
+    auto sent =
+        ws_transport_send(fd, ssl, use_tls, buffer + total, length - total);
+    if (sent <= 0) {
+      return false;
+    }
+    total += (size_t)sent;
+  }
+  ulog_trace("[ws-client] send_all complete bytes=%zu", length);
+  return true;
+}
+
+[[nodiscard]] static bool ws_discard_bytes(ws_client_t *client, uint64_t length,
+                                           const char *context) {
+  uint8_t scratch[512] = {0};
+  auto remaining = length;
+
+  while (remaining > 0) {
+    auto chunk =
+        (remaining > sizeof(scratch)) ? sizeof(scratch) : (size_t)remaining;
+    if (!ws_read_exact(client, scratch, chunk, context)) {
+      return false;
+    }
+    remaining -= chunk;
+  }
+
+  return true;
+}
+
+[[nodiscard]] static bool ws_get_random_bytes(uint8_t *buffer, size_t length) {
+  auto fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    size_t read_total = 0;
+    while (read_total < length) {
+      auto bytes = read(fd, buffer + read_total, length - read_total);
+      if (bytes <= 0) {
+        (void)close(fd);
+        fd = -1;
+        break;
+      }
+      read_total += (size_t)bytes;
+    }
+
+    if (fd >= 0) {
+      (void)close(fd);
+      if (read_total == length) {
+        return true;
+      }
+    }
+  }
+
+  static bool seeded = false;
+  if (!seeded) {
+    srand((unsigned)time(nullptr));
+    seeded = true;
+  }
+
+  for (size_t i = 0; i < length; ++i) {
+    buffer[i] = (uint8_t)(rand() & 0xFF);
+  }
+
+  return true;
+}
+
+[[nodiscard]] static bool ws_connect_tcp(const char *host, uint16_t port,
+                                         uint32_t read_timeout_seconds,
+                                         uint32_t write_timeout_seconds,
+                                         int *out_fd) {
+  ulog_debug("[ws-client] connecting tcp host=%s port=%u read_timeout=%u "
+             "write_timeout=%u",
+             host, (unsigned)port, (unsigned)read_timeout_seconds,
+             (unsigned)write_timeout_seconds);
+  char port_text[6] = {0};
+  (void)snprintf(port_text, sizeof(port_text), "%u", (unsigned)port);
+
+  struct addrinfo hints = {0};
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
+
+  struct addrinfo *result = nullptr;
+  auto status = getaddrinfo(host, port_text, &hints, &result);
+  if (status != 0) {
+    return false;
+  }
+
+  auto connected_fd = -1;
+  unsigned attempt = 0;
+  for (auto current = result; current != nullptr; current = current->ai_next) {
+    attempt += 1;
+    auto fd =
+        socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+    if (fd < 0) {
+      ulog_trace("[ws-client] socket() attempt=%u failed: %s", attempt,
+                 strerror(errno));
+      continue;
+    }
+
+    struct timeval timeout = {
+        .tv_sec = (time_t)read_timeout_seconds,
+        .tv_usec = 0,
+    };
+
+    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    timeout.tv_sec = (time_t)write_timeout_seconds;
+    (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+    if (connect(fd, current->ai_addr, current->ai_addrlen) == 0) {
+      connected_fd = fd;
+      ulog_debug("[ws-client] tcp connected on attempt=%u fd=%d", attempt, fd);
+      break;
+    }
+
+    ulog_trace("[ws-client] connect() attempt=%u failed: %s", attempt,
+               strerror(errno));
+    (void)close(fd);
+  }
+
+  freeaddrinfo(result);
+
+  if (connected_fd < 0) {
+    ulog_debug("[ws-client] tcp connection failed host=%s port=%u attempts=%u",
+               host, (unsigned)port, attempt);
+    return false;
+  }
+
+  *out_fd = connected_fd;
+  return true;
+}
+
+[[nodiscard]] static bool ws_init_tls_ctx(ws_client_t *client) {
+  if (client->ssl_ctx != nullptr) {
+    ulog_trace("[ws-client] reusing existing TLS context");
+    return true;
+  }
+
+  ulog_trace("[ws-client] creating TLS context");
+  auto ctx = SSL_CTX_new(TLS_client_method());
+  if (ctx == nullptr) {
+    ulog_debug("[ws-client] SSL_CTX_new failed");
+    return false;
+  }
+
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+  if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+    ulog_debug("[ws-client] SSL_CTX_set_default_verify_paths failed");
+    SSL_CTX_free(ctx);
+    return false;
+  }
+
+  client->ssl_ctx = ctx;
+  ulog_trace("[ws-client] TLS context created");
+  return true;
+}
+
+[[nodiscard]] static bool ws_connect_tls(const char *host, int socket_fd,
+                                         SSL_CTX *ctx, SSL **out_ssl) {
+  ulog_debug("[ws-client] starting TLS handshake host=%s fd=%d", host,
+             socket_fd);
+  auto ssl = SSL_new(ctx);
+  if (ssl == nullptr) {
+    ulog_debug("[ws-client] SSL_new failed");
+    return false;
+  }
+
+  if (SSL_set_tlsext_host_name(ssl, host) != 1) {
+    ulog_debug("[ws-client] SSL_set_tlsext_host_name failed for host=%s", host);
+    SSL_free(ssl);
+    return false;
+  }
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  if (SSL_set1_host(ssl, host) != 1) {
+    ulog_debug("[ws-client] SSL_set1_host failed for host=%s", host);
+    SSL_free(ssl);
+    return false;
+  }
+#endif
+
+  if (SSL_set_fd(ssl, socket_fd) != 1 || SSL_connect(ssl) != 1) {
+    ulog_debug("[ws-client] TLS handshake failed host=%s fd=%d", host,
+               socket_fd);
+    SSL_free(ssl);
+    wc_ecc_fp_free();
+    return false;
+  }
+
+  /* Free retained ECC fixed-point tables after certificate verification. */
+  wc_ecc_fp_free();
+
+  *out_ssl = ssl;
+  ulog_debug("[ws-client] TLS handshake complete host=%s fd=%d", host,
+             socket_fd);
+  return true;
+}
+
+[[nodiscard]] static bool ws_find_header_value(const char *response,
+                                               const char *header_name,
+                                               char *value,
+                                               size_t value_capacity) {
+  auto header_name_length = strlen(header_name);
+  auto line = strstr(response, "\r\n");
+  if (line == nullptr) {
+    return false;
+  }
+  line += 2;
+
+  while (*line != '\0') {
+    auto line_end = strstr(line, "\r\n");
+    if (line_end == nullptr) {
+      return false;
+    }
+    if (line_end == line) {
+      return false;
+    }
+
+    auto line_length = (size_t)(line_end - line);
+    const char *colon = (const char *)memchr(line, ':', line_length);
+    if (colon != nullptr) {
+      auto name_length = (size_t)(colon - line);
+      if (name_length == header_name_length &&
+          strncasecmp(line, header_name, header_name_length) == 0) {
+        const char *raw = colon + 1;
+        while (*raw == ' ' || *raw == '\t') {
+          ++raw;
+        }
+
+        const char *raw_end = line_end;
+        while (raw_end > raw && (raw_end[-1] == ' ' || raw_end[-1] == '\t')) {
+          --raw_end;
+        }
+
+        auto value_length = (size_t)(raw_end - raw);
+        if (value_length + 1 > value_capacity) {
+          return false;
+        }
+
+        memcpy(value, raw, value_length);
+        value[value_length] = '\0';
+        return true;
+      }
+    }
+
+    line = line_end + 2;
+  }
+
+  return false;
+}
+
+[[nodiscard]] static bool ws_header_has_token(const char *value,
+                                              const char *token) {
+  auto token_length = strlen(token);
+  auto cursor = value;
+
+  while (*cursor != '\0') {
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == ',') {
+      ++cursor;
+    }
+
+    auto start = cursor;
+    while (*cursor != '\0' && *cursor != ',') {
+      ++cursor;
+    }
+
+    auto end = cursor;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
+      --end;
+    }
+
+    if ((size_t)(end - start) == token_length &&
+        strncasecmp(start, token, token_length) == 0) {
+      return true;
+    }
+
+    if (*cursor == ',') {
+      ++cursor;
+    }
+  }
+
+  return false;
+}
+
+[[nodiscard]] static bool ws_compute_accept_value(const char *key, char *output,
+                                                  size_t output_capacity) {
+  char challenge[128] = {0};
+  auto printed =
+      snprintf(challenge, sizeof(challenge), "%s%s", key, WS_ACCEPT_GUID);
+  if (printed < 0 || (size_t)printed >= sizeof(challenge)) {
+    return false;
+  }
+
+  sha1_ctx_t sha1 = {0};
+  uint8_t digest[20] = {0};
+
+  ws_sha1_init(&sha1);
+  ws_sha1_update(&sha1, (const uint8_t *)challenge, (size_t)printed);
+  ws_sha1_final(&sha1, digest);
+
+  return ws_base64_encode(digest, sizeof(digest), output, output_capacity) != 0;
+}
+
+[[nodiscard]] static bool ws_send_frame(ws_client_t *client, uint8_t opcode,
+                                        const uint8_t *payload,
+                                        size_t payload_length) {
+  if (client == nullptr || !client->connected) {
+    return false;
+  }
+  ulog_trace("[ws-client] send frame opcode=0x%X payload=%zu", (unsigned)opcode,
+             payload_length);
+
+  size_t length_field_size = 0;
+  if (payload_length <= 125) {
+    length_field_size = 0;
+  } else if (payload_length <= UINT16_MAX) {
+    length_field_size = 2;
+  } else {
+    length_field_size = 8;
+  }
+
+  if (payload_length > SIZE_MAX - (2 + length_field_size + 4)) {
+    ws_set_error(client, "Frame payload is too large");
+    return false;
+  }
+
+  auto frame_length = 2 + length_field_size + 4 + payload_length;
+  auto frame = (uint8_t *)calloc(frame_length, sizeof(uint8_t));
+  if (frame == nullptr) {
+    ws_set_error(client, "Failed to allocate frame buffer");
+    return false;
+  }
+
+  size_t offset = 0;
+  frame[offset++] = (uint8_t)(0x80U | (opcode & 0x0FU));
+
+  if (payload_length <= 125) {
+    frame[offset++] = (uint8_t)(0x80U | (uint8_t)payload_length);
+  } else if (payload_length <= UINT16_MAX) {
+    frame[offset++] = (uint8_t)(0x80U | 126U);
+    frame[offset++] = (uint8_t)((payload_length >> 8U) & 0xFFU);
+    frame[offset++] = (uint8_t)(payload_length & 0xFFU);
+  } else {
+    frame[offset++] = (uint8_t)(0x80U | 127U);
+    for (size_t shift = 0; shift < 8; ++shift) {
+      auto bits = (7U - shift) * 8U;
+      frame[offset++] = (uint8_t)(((uint64_t)payload_length >> bits) & 0xFFU);
+    }
+  }
+
+  uint8_t mask[4] = {0};
+  if (!ws_get_random_bytes(mask, sizeof(mask))) {
+    free(frame);
+    ws_set_error(client, "Failed to generate websocket mask");
+    return false;
+  }
+
+  memcpy(frame + offset, mask, sizeof(mask));
+  offset += sizeof(mask);
+
+  for (size_t i = 0; i < payload_length; ++i) {
+    auto source = (payload != nullptr) ? payload[i] : 0U;
+    frame[offset + i] = source ^ mask[i % 4];
+  }
+
+  auto ok = ws_send_all(client->socket_fd, client->ssl, client->use_tls, frame,
+                        frame_length);
+  free(frame);
+
+  if (!ok) {
+    ws_set_error(client, "Failed to send frame: %s", strerror(errno));
+    return false;
+  }
+
+  return true;
+}
+
+[[nodiscard]] ws_client_t *ws_client_create() {
+  auto client = (ws_client_t *)calloc(1, sizeof(ws_client_t));
+  if (client == nullptr) {
+    return nullptr;
+  }
+
+  client->socket_fd = -1;
+  client->connected = false;
+  client->use_tls = false;
+  client->read_timeout_seconds = WS_DEFAULT_READ_TIMEOUT_SECONDS;
+  client->write_timeout_seconds = WS_DEFAULT_WRITE_TIMEOUT_SECONDS;
+  client->ssl_ctx = nullptr;
+  client->ssl = nullptr;
+  client->last_error[0] = '\0';
+  return client;
+}
+
+void ws_client_destroy(ws_client_t *client) {
+  if (client == nullptr) {
+    return;
+  }
+
+  ws_client_close(client);
+  if (client->ssl_ctx != nullptr) {
+    SSL_CTX_free(client->ssl_ctx);
+    client->ssl_ctx = nullptr;
+  }
+  free(client);
+}
+
+[[nodiscard]] bool ws_client_set_timeouts(ws_client_t *client,
+                                          uint32_t read_timeout_seconds,
+                                          uint32_t write_timeout_seconds) {
+  if (client == nullptr || read_timeout_seconds == 0 ||
+      write_timeout_seconds == 0 || read_timeout_seconds > (uint32_t)INT_MAX ||
+      write_timeout_seconds > (uint32_t)INT_MAX) {
+    return false;
+  }
+
+  client->read_timeout_seconds = read_timeout_seconds;
+  client->write_timeout_seconds = write_timeout_seconds;
+  return true;
+}
+
+[[nodiscard]] static bool
+ws_client_connect_impl(ws_client_t *client, const char *host, uint16_t port,
+                       const char *path, bool use_tls) {
+  if (client == nullptr || host == nullptr || path == nullptr) {
+    return false;
+  }
+
+  ulog_debug("[ws-client] connect start scheme=%s host=%s port=%u path=%s",
+             use_tls ? "wss" : "ws", host, (unsigned)port, path);
+  if (client->connected) {
+    ulog_trace("[ws-client] closing previous connection before reconnect");
+    ws_client_close(client);
+  }
+
+  int socket_fd = -1;
+  if (!ws_connect_tcp(host, port, client->read_timeout_seconds,
+                      client->write_timeout_seconds, &socket_fd)) {
+    ws_set_error(client, "Failed to connect to %s:%u", host, (unsigned)port);
+    return false;
+  }
+
+  SSL *ssl = nullptr;
+  if (use_tls) {
+    if (!ws_init_tls_ctx(client) ||
+        !ws_connect_tls(host, socket_fd, client->ssl_ctx, &ssl)) {
+      ws_set_error(client, "Failed to establish TLS with %s:%u", host,
+                   (unsigned)port);
+      (void)close(socket_fd);
+      return false;
+    }
+  }
+
+  uint8_t key_raw[16] = {0};
+  if (!ws_get_random_bytes(key_raw, sizeof(key_raw))) {
+    ws_set_error(client, "Failed to generate handshake key");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  char key_encoded[32] = {0};
+  if (ws_base64_encode(key_raw, sizeof(key_raw), key_encoded,
+                       sizeof(key_encoded)) == 0) {
+    ws_set_error(client, "Failed to encode handshake key");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  char request[1024] = {0};
+  auto request_length = snprintf(request, sizeof(request),
+                                 "GET %s HTTP/1.1\r\n"
+                                 "Host: %s:%u\r\n"
+                                 "Upgrade: websocket\r\n"
+                                 "Connection: Upgrade\r\n"
+                                 "Sec-WebSocket-Key: %s\r\n"
+                                 "Sec-WebSocket-Version: %u\r\n"
+                                 "\r\n",
+                                 path, host, (unsigned)port, key_encoded,
+                                 (unsigned)WS_HANDSHAKE_VERSION);
+
+  if (request_length < 0 || (size_t)request_length >= sizeof(request)) {
+    ws_set_error(client, "Handshake request is too large");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  if (!ws_send_all(socket_fd, ssl, use_tls, (const uint8_t *)request,
+                   (size_t)request_length)) {
+    ws_set_error(client, "Failed to send handshake: %s", strerror(errno));
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+  ulog_trace("[ws-client] websocket handshake request sent bytes=%zu",
+             (size_t)request_length);
+
+  char response[WS_HTTP_RESPONSE_CAPACITY] = {0};
+  size_t response_length = 0;
+  while (response_length + 1 < sizeof(response)) {
+    uint8_t byte = 0;
+    auto bytes = ws_transport_recv(socket_fd, ssl, use_tls, &byte, 1);
+    if (bytes <= 0) {
+      ws_set_transport_read_error(client, "Receiving handshake response", bytes,
+                                  ssl, use_tls, client->read_timeout_seconds);
+      if (ssl != nullptr) {
+        SSL_free(ssl);
+      }
+      (void)close(socket_fd);
+      return false;
+    }
+
+    response[response_length++] = (char)byte;
+    response[response_length] = '\0';
+
+    if (response_length >= 4 &&
+        memcmp(response + response_length - 4, "\r\n\r\n", 4) == 0) {
+      break;
+    }
+  }
+
+  if (strstr(response, "\r\n\r\n") == nullptr) {
+    ws_set_error(client, "Incomplete handshake response");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  if (strncmp(response, "HTTP/1.1 101", 12) != 0 &&
+      strncmp(response, "HTTP/1.0 101", 12) != 0) {
+    ws_set_error(client, "Server rejected websocket upgrade");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  char upgrade_header[WS_MAX_HEADER_VALUE] = {0};
+  if (!ws_find_header_value(response, "Upgrade", upgrade_header,
+                            sizeof(upgrade_header)) ||
+      strcasecmp(upgrade_header, "websocket") != 0) {
+    ws_set_error(client, "Handshake missing valid Upgrade header");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  char connection_header[WS_MAX_HEADER_VALUE] = {0};
+  if (!ws_find_header_value(response, "Connection", connection_header,
+                            sizeof(connection_header)) ||
+      !ws_header_has_token(connection_header, "Upgrade")) {
+    ws_set_error(client, "Handshake missing valid Connection header");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  char accept_received[WS_MAX_HEADER_VALUE] = {0};
+  if (!ws_find_header_value(response, "Sec-WebSocket-Accept", accept_received,
+                            sizeof(accept_received))) {
+    ws_set_error(client, "Handshake missing Sec-WebSocket-Accept");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  char accept_expected[WS_MAX_HEADER_VALUE] = {0};
+  if (!ws_compute_accept_value(key_encoded, accept_expected,
+                               sizeof(accept_expected))) {
+    ws_set_error(client, "Failed to compute expected accept key");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  if (strcmp(accept_received, accept_expected) != 0) {
+    ws_set_error(client, "Invalid Sec-WebSocket-Accept header");
+    if (ssl != nullptr) {
+      SSL_free(ssl);
+    }
+    (void)close(socket_fd);
+    return false;
+  }
+
+  client->socket_fd = socket_fd;
+  client->connected = true;
+  client->use_tls = use_tls;
+  client->ssl = ssl;
+  client->last_error[0] = '\0';
+  ulog_debug("[ws-client] websocket connection established scheme=%s host=%s "
+             "port=%u path=%s fd=%d",
+             use_tls ? "wss" : "ws", host, (unsigned)port, path, socket_fd);
+  return true;
+}
+
+[[nodiscard]] bool ws_client_connect(ws_client_t *client, const char *host,
+                                     uint16_t port, const char *path) {
+  return ws_client_connect_impl(client, host, port, path, false);
+}
+
+[[nodiscard]] bool ws_client_connect_secure(ws_client_t *client,
+                                            const char *host, uint16_t port,
+                                            const char *path) {
+  return ws_client_connect_impl(client, host, port, path, true);
+}
+
+bool ws_client_send_text(ws_client_t *client, const char *text, size_t length) {
+  if (client == nullptr || text == nullptr) {
+    return false;
+  }
+
+  return ws_send_frame(client, 0x1U, (const uint8_t *)text, length);
+}
+
+bool ws_client_send_binary(ws_client_t *client, const uint8_t *data,
+                           size_t length) {
+  if (client == nullptr || data == nullptr) {
+    return false;
+  }
+
+  return ws_send_frame(client, 0x2U, data, length);
+}
+
+[[nodiscard]] static bool
+ws_client_receive_data(ws_client_t *client, uint8_t expected_opcode,
+                       const char *expected_name, uint8_t *buffer,
+                       size_t capacity, size_t *out_length,
+                       bool add_nul_terminator) {
+  ulog_trace("[ws-client] receive %s frame(s) capacity=%zu", expected_name,
+             capacity);
+  size_t total_length = 0;
+  bool receiving_fragments = false;
+  bool discarding_oversized_message = false;
+
+  while (true) {
+    uint8_t header[2] = {0};
+    if (!ws_read_exact(client, header, sizeof(header),
+                       "Reading websocket frame header")) {
+      return false;
+    }
+
+    auto fin = (header[0] & 0x80U) != 0;
+    auto opcode = header[0] & 0x0FU;
+    auto masked = (header[1] & 0x80U) != 0;
+
+    uint64_t payload_length = header[1] & 0x7FU;
+    if (payload_length == 126U) {
+      uint8_t extended[2] = {0};
+      if (!ws_read_exact(client, extended, sizeof(extended),
+                         "Reading websocket frame length")) {
+        return false;
+      }
+      payload_length = ((uint64_t)extended[0] << 8U) | (uint64_t)extended[1];
+    } else if (payload_length == 127U) {
+      uint8_t extended[8] = {0};
+      if (!ws_read_exact(client, extended, sizeof(extended),
+                         "Reading websocket frame length")) {
+        return false;
+      }
+      payload_length = 0;
+      for (size_t i = 0; i < 8; ++i) {
+        payload_length = (payload_length << 8U) | (uint64_t)extended[i];
+      }
+    }
+    ulog_trace(
+        "[ws-client] recv frame fin=%u opcode=0x%X masked=%u payload=%llu",
+        fin ? 1U : 0U, (unsigned)opcode, masked ? 1U : 0U,
+        (unsigned long long)payload_length);
+
+    uint8_t mask[4] = {0};
+    if (masked) {
+      if (!ws_read_exact(client, mask, sizeof(mask),
+                         "Reading websocket frame mask")) {
+        return false;
+      }
+    }
+
+    if (opcode == 0x8U) {
+      (void)ws_discard_bytes(client, payload_length,
+                             "Discarding close frame payload");
+      ws_client_close(client);
+      ws_set_error(client, "Connection closed by server");
+      return false;
+    }
+
+    if (opcode == 0x9U) {
+      if (!fin) {
+        ws_set_error(client, "Ping frames must not be fragmented");
+        return false;
+      }
+      if (payload_length > 125U) {
+        ws_set_error(client, "Invalid ping frame length");
+        return false;
+      }
+
+      uint8_t ping_payload[125] = {0};
+      if (!ws_read_exact(client, ping_payload, (size_t)payload_length,
+                         "Reading ping payload")) {
+        return false;
+      }
+
+      if (masked) {
+        for (size_t i = 0; i < payload_length; ++i) {
+          ping_payload[i] ^= mask[i % 4];
+        }
+      }
+
+      if (!ws_send_frame(client, 0xAU, ping_payload, (size_t)payload_length)) {
+        return false;
+      }
+      ulog_trace("[ws-client] ping handled, pong sent payload=%llu",
+                 (unsigned long long)payload_length);
+      continue;
+    }
+
+    if (opcode == 0xAU) {
+      if (!fin) {
+        ws_set_error(client, "Pong frames must not be fragmented");
+        return false;
+      }
+      if (!ws_discard_bytes(client, payload_length,
+                            "Discarding pong payload")) {
+        return false;
+      }
+      continue;
+    }
+
+    bool is_start = opcode == expected_opcode;
+    bool is_continuation = opcode == 0x0U;
+    if (!is_start && !is_continuation) {
+      (void)ws_discard_bytes(client, payload_length,
+                             "Discarding unexpected frame payload");
+      ws_set_error(client,
+                   "Unexpected websocket opcode 0x%X while waiting for %s data",
+                   (unsigned)opcode, expected_name);
+      return false;
+    }
+
+    if (is_start) {
+      if (receiving_fragments) {
+        (void)ws_discard_bytes(
+            client, payload_length,
+            "Discarding unexpected fragmented frame payload");
+        ws_set_error(
+            client, "Received new %s frame before fragmented message completed",
+            expected_name);
+        return false;
+      }
+      receiving_fragments = true;
+    } else if (!receiving_fragments) {
+      (void)ws_discard_bytes(
+          client, payload_length,
+          "Discarding unexpected continuation frame payload");
+      ws_set_error(client, "Unexpected continuation frame");
+      return false;
+    }
+
+    auto terminator_size = add_nul_terminator ? 1U : 0U;
+    if (total_length > SIZE_MAX - terminator_size) {
+      (void)ws_discard_bytes(client, payload_length,
+                             "Discarding oversized frame payload");
+      ws_set_error(client, "Frame too large for this platform");
+      return false;
+    }
+    if (payload_length >
+        (uint64_t)(SIZE_MAX - total_length - terminator_size)) {
+      (void)ws_discard_bytes(client, payload_length,
+                             "Discarding oversized frame payload");
+      ws_set_error(client, "Frame too large for this platform");
+      return false;
+    }
+
+    auto required = total_length + (size_t)payload_length + terminator_size;
+    if (required > capacity || discarding_oversized_message) {
+      if (!ws_discard_bytes(client, payload_length,
+                            "Discarding oversized frame payload")) {
+        return false;
+      }
+
+      total_length += (size_t)payload_length;
+      discarding_oversized_message = true;
+      if (!fin) {
+        continue;
+      }
+
+      ws_set_error(client, "Receive buffer is too small (%zu bytes required)",
+                   total_length + terminator_size);
+      return false;
+    }
+
+    if (!ws_read_exact(client, buffer + total_length, (size_t)payload_length,
+                       "Reading websocket frame payload")) {
+      return false;
+    }
+
+    if (masked) {
+      for (size_t i = 0; i < payload_length; ++i) {
+        buffer[total_length + i] ^= mask[i % 4];
+      }
+    }
+
+    total_length += (size_t)payload_length;
+
+    if (!fin) {
+      continue;
+    }
+
+    if (add_nul_terminator) {
+      buffer[total_length] = '\0';
+    }
+
+    if (out_length != nullptr) {
+      *out_length = total_length;
+    }
+    ulog_trace("[ws-client] receive complete type=%s bytes=%zu", expected_name,
+               total_length);
+    return true;
+  }
+}
+
+[[nodiscard]] bool ws_client_receive_text(ws_client_t *client, char *buffer,
+                                          size_t capacity, size_t *out_length) {
+  if (client == nullptr || buffer == nullptr || capacity == 0) {
+    return false;
+  }
+
+  return ws_client_receive_data(client, 0x1U, "text", (uint8_t *)buffer,
+                                capacity, out_length, true);
+}
+
+[[nodiscard]] bool ws_client_receive_binary(ws_client_t *client,
+                                            uint8_t *buffer, size_t capacity,
+                                            size_t *out_length) {
+  if (client == nullptr || buffer == nullptr || capacity == 0) {
+    return false;
+  }
+
+  return ws_client_receive_data(client, 0x2U, "binary", buffer, capacity,
+                                out_length, false);
+}
+
+void ws_client_close(ws_client_t *client) {
+  if (client == nullptr || !client->connected) {
+    return;
+  }
+
+  ulog_debug("[ws-client] closing websocket connection fd=%d tls=%s",
+             client->socket_fd, client->use_tls ? "true" : "false");
+  (void)ws_send_frame(client, 0x8U, nullptr, 0);
+  if (client->ssl != nullptr) {
+    (void)SSL_shutdown(client->ssl);
+    SSL_free(client->ssl);
+    client->ssl = nullptr;
+  }
+  (void)shutdown(client->socket_fd, SHUT_RDWR);
+  (void)close(client->socket_fd);
+  client->socket_fd = -1;
+  client->connected = false;
+  client->use_tls = false;
+}
+
+[[nodiscard]] const char *ws_client_last_error(const ws_client_t *client) {
+  if (client == nullptr) {
+    return "ws_client_t pointer is nullptr";
+  }
+
+  if (client->last_error[0] == '\0') {
+    return "no error";
+  }
+
+  return client->last_error;
+}

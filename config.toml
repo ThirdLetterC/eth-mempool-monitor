@@ -1,0 +1,55 @@
+[connection]
+host = "eth.drpc.org"
+port = 443
+path = "/"
+secure = true
+read_timeout_seconds = 30
+write_timeout_seconds = 30
+
+[retry]
+enabled = true
+initial_backoff_ms = 1000
+max_backoff_ms = 30000
+
+[rpc_control]
+host = "127.0.0.1"
+port = 8080
+backlog = 4096
+# Required by rpc_control; replace before running.
+auth_token = "xxx"
+
+[subscription]
+request = """
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "eth_subscribe",
+  "params": ["newPendingTransactions", true]
+}
+"""
+
+[redis]
+host = "127.0.0.1"
+port = 6379
+monitored_set_key = "monitored_addresses"
+
+[rabbitmq]
+enabled = true
+host = "127.0.0.1"
+port = 5672
+username = "guest"
+password = "guest"
+vhost = "/"
+queue = "monitored_transactions"
+queue_durable = true
+channel = 1
+heartbeat_seconds = 30
+
+[rabbitmq_consumer]
+read_timeout_seconds = 1
+prefetch_count = 200
+auto_ack = false
+
+[logging]
+level = "info"
+color = true
