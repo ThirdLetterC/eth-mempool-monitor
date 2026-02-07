@@ -125,51 +125,51 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    const example_module = b.createModule(.{
+    const monitor_module = b.createModule(.{
         .target = target,
         .optimize = optimize,
         .strip = strip_binaries,
         .link_libc = true,
         .sanitize_c = sanitize_c,
     });
-    example_module.addIncludePath(b.path("include"));
-    example_module.addCSourceFile(.{ .file = b.path("src/parg.c"), .flags = c_flags });
-    example_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
-    example_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
-    example_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
-    example_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher.c"), .flags = c_flags });
-    example_module.addCSourceFile(.{ .file = b.path("src/subscriber.c"), .flags = c_flags });
-    example_module.addCSourceFile(.{ .file = b.path("src/main.c"), .flags = c_flags });
+    monitor_module.addIncludePath(b.path("include"));
+    monitor_module.addCSourceFile(.{ .file = b.path("src/parg.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/main.c"), .flags = c_flags });
     if (use_mimalloc) {
-        example_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });
+        monitor_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });
     }
     for (hiredis_files) |file| {
-        example_module.addCSourceFile(.{ .file = b.path(file), .flags = hiredis_c_flags });
+        monitor_module.addCSourceFile(.{ .file = b.path(file), .flags = hiredis_c_flags });
     }
     for (rabbitmq_files) |file| {
-        example_module.addCSourceFile(.{ .file = b.path(file), .flags = rabbitmq_c_flags });
+        monitor_module.addCSourceFile(.{ .file = b.path(file), .flags = rabbitmq_c_flags });
     }
 
-    const example = b.addExecutable(.{
+    const monitor = b.addExecutable(.{
         .name = "eth_mempool_monitor",
-        .root_module = example_module,
+        .root_module = monitor_module,
     });
-    example.linkLibrary(lib);
-    example.linkSystemLibrary("wolfssl");
+    monitor.linkLibrary(lib);
+    monitor.linkSystemLibrary("wolfssl");
     if (use_mimalloc) {
-        example.linkSystemLibrary("mimalloc");
+        monitor.linkSystemLibrary("mimalloc");
     }
-    example.linkLibC();
+    monitor.linkLibC();
 
-    b.installArtifact(example);
+    b.installArtifact(monitor);
 
-    const run_example = b.addRunArtifact(example);
+    const run_monitor = b.addRunArtifact(monitor);
     if (b.args) |args| {
-        run_example.addArgs(args);
+        run_monitor.addArgs(args);
     }
 
-    const run_step = b.step("run-example", "Run websocket example client");
-    run_step.dependOn(&run_example.step);
+    const run_step = b.step("run-example", "Run ETH mempool monitor");
+    run_step.dependOn(&run_monitor.step);
 
     const rabbitmq_console_module = b.createModule(.{
         .target = target,
