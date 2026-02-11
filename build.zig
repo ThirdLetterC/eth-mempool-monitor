@@ -53,6 +53,7 @@ pub fn build(b: *std.Build) void {
                 "-Wextra",
                 "-Wpedantic",
                 "-Werror",
+                "-DWC_NO_HARDEN",
                 "-DUSE_MIMALLOC=1",
                 "-fstack-protector-strong",
                 "-D_FORTIFY_SOURCE=3",
@@ -65,6 +66,7 @@ pub fn build(b: *std.Build) void {
                 "-Wextra",
                 "-Wpedantic",
                 "-Werror",
+                "-DWC_NO_HARDEN",
                 "-DUSE_MIMALLOC=1",
             }
     else if (enable_hardening)
@@ -74,6 +76,7 @@ pub fn build(b: *std.Build) void {
             "-Wextra",
             "-Wpedantic",
             "-Werror",
+            "-DWC_NO_HARDEN",
             "-fstack-protector-strong",
             "-D_FORTIFY_SOURCE=3",
             "-fPIE",
@@ -85,6 +88,7 @@ pub fn build(b: *std.Build) void {
             "-Wextra",
             "-Wpedantic",
             "-Werror",
+            "-DWC_NO_HARDEN",
         };
     const ulog_c_flags = if (enable_hardening)
         &[_][]const u8{
@@ -146,6 +150,7 @@ pub fn build(b: *std.Build) void {
             "-D_DEFAULT_SOURCE",
             "-D_POSIX_C_SOURCE=200809L",
             "-DHAVE_POLL",
+            "-DWC_NO_HARDEN",
             "-fstack-protector-strong",
             "-D_FORTIFY_SOURCE=3",
             "-fPIE",
@@ -156,6 +161,7 @@ pub fn build(b: *std.Build) void {
             "-D_DEFAULT_SOURCE",
             "-D_POSIX_C_SOURCE=200809L",
             "-DHAVE_POLL",
+            "-DWC_NO_HARDEN",
         };
     const jsonrpc_c_flags = if (use_mimalloc)
         if (enable_hardening)

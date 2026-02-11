@@ -20,9 +20,9 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <wolfssl/options.h>
 #include <wolfssl/openssl/err.h>
 #include <wolfssl/openssl/ssl.h>
-#include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 
 constexpr size_t WS_ERROR_MESSAGE_CAPACITY = 256;

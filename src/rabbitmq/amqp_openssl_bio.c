@@ -5,9 +5,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include <wolfssl/options.h>
 #include <wolfssl/openssl/bio.h>
 #include <wolfssl/openssl/ssl.h>
-#include <wolfssl/options.h>
 
 #include "rabbitmq//amqp_openssl_bio.h"
 #include "rabbitmq//amqp_socket.h"

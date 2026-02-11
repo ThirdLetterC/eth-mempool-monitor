@@ -9,9 +9,9 @@
 #define OPENSSL_API_COMPAT 10101
 
 #include <limits.h>
+#include <wolfssl/options.h>
 #include <wolfssl/openssl/bio.h>
 #include <wolfssl/openssl/conf.h>
-#include <wolfssl/options.h>
 #ifdef ENABLE_SSL_ENGINE_API
 #include <wolfssl/openssl/engine.h>
 #endif
