@@ -24,10 +24,11 @@
 #ifndef PARG_H_INCLUDED
 #define PARG_H_INCLUDED
 
-static constexpr int PARG_VER_MAJOR = 1;        /**< Major version number */
-static constexpr int PARG_VER_MINOR = 0;        /**< Minor version number */
-static constexpr int PARG_VER_PATCH = 3;        /**< Patch version number */
-static constexpr char PARG_VER_STRING[] = "1.0.3"; /**< Version number as a string */
+static constexpr int PARG_VER_MAJOR = 1; /**< Major version number */
+static constexpr int PARG_VER_MINOR = 0; /**< Minor version number */
+static constexpr int PARG_VER_PATCH = 3; /**< Patch version number */
+static constexpr char PARG_VER_STRING[] =
+    "1.0.3"; /**< Version number as a string */
 
 /**
  * Values for `has_arg` flag in `parg_option`.

@@ -17,7 +17,7 @@ build-valgrind:
     zig build -Dvalgrind=true
 
 format:
-    find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format-20 -i
+    find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i
 
 valgrind-rpc-control *args:
     zig build -Dvalgrind=true valgrind-rpc-control -- {{args}}

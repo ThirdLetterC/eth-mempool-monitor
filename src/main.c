@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdckdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,7 +88,8 @@ struct app_cli_overrides {
 };
 
 static constexpr char APP_DEFAULT_CONFIG_PATH[] = "config.toml";
-static constexpr char APP_DEFAULT_HOST[] = "ethereum-sepolia-rpc.publicnode.com";
+static constexpr char APP_DEFAULT_HOST[] =
+    "ethereum-sepolia-rpc.publicnode.com";
 static constexpr uint16_t APP_DEFAULT_PORT = 443;
 static constexpr char APP_DEFAULT_PATH[] = "/";
 static constexpr ulog_level APP_DEFAULT_LOG_LEVEL = ULOG_LEVEL_INFO;
@@ -236,7 +238,12 @@ static void app_configure_allocator_overrides() {
   }
 
   auto len = strlen(text);
-  auto copy = calloc(len + 1, sizeof(char));
+  size_t allocation_length = 0;
+  if (ckd_add(&allocation_length, len, (size_t)1)) {
+    return nullptr;
+  }
+
+  auto copy = calloc(allocation_length, sizeof(char));
   if (copy == nullptr) {
     return nullptr;
   }

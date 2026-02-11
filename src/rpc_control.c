@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdckdint.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,7 +166,12 @@ static void rpc_control_print_usage(const char *program_name) {
   }
 
   auto len = strlen(text);
-  auto copy = calloc(len + 1, sizeof(char));
+  size_t allocation_length = 0;
+  if (ckd_add(&allocation_length, len, (size_t)1)) {
+    return nullptr;
+  }
+
+  auto copy = calloc(allocation_length, sizeof(char));
   if (copy == nullptr) {
     return nullptr;
   }
@@ -678,21 +684,36 @@ rpc_control_mark_connection_authenticated(jsonrpc_conn_t *conn) {
 
   if (g_runtime.authenticated_connection_count ==
       g_runtime.authenticated_connection_capacity) {
-    size_t new_capacity = g_runtime.authenticated_connection_capacity == 0
-                              ? 16
-                              : g_runtime.authenticated_connection_capacity * 2;
-    if (new_capacity < g_runtime.authenticated_connection_count ||
-        new_capacity >
-            SIZE_MAX / sizeof(*g_runtime.authenticated_connections)) {
+    size_t new_capacity = 0;
+    if (g_runtime.authenticated_connection_capacity == 0) {
+      new_capacity = 16;
+    } else if (ckd_mul(&new_capacity,
+                       g_runtime.authenticated_connection_capacity,
+                       (size_t)2)) {
       return false;
     }
 
-    auto resized = (jsonrpc_conn_t **)realloc(
-        g_runtime.authenticated_connections,
-        new_capacity * sizeof(*g_runtime.authenticated_connections));
+    if (new_capacity < g_runtime.authenticated_connection_count) {
+      return false;
+    }
+
+    auto resized = (jsonrpc_conn_t **)calloc(
+        new_capacity, sizeof(*g_runtime.authenticated_connections));
     if (resized == nullptr) {
       return false;
     }
+
+    if (g_runtime.authenticated_connection_count > 0) {
+      size_t copy_bytes = 0;
+      if (ckd_mul(&copy_bytes, g_runtime.authenticated_connection_count,
+                  sizeof(*g_runtime.authenticated_connections))) {
+        free(resized);
+        return false;
+      }
+      memcpy(resized, g_runtime.authenticated_connections, copy_bytes);
+    }
+
+    free(g_runtime.authenticated_connections);
     g_runtime.authenticated_connections = resized;
     g_runtime.authenticated_connection_capacity = new_capacity;
   }

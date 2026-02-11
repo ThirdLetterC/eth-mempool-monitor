@@ -43,15 +43,40 @@ pub fn build(b: *std.Build) void {
     ) orelse false;
     const use_sanitizers = enable_sanitizers and optimize == .Debug and target.result.os.tag != .windows;
     const sanitize_c = if (use_sanitizers) std.zig.SanitizeC.full else std.zig.SanitizeC.off;
+    const enable_hardening = target.result.os.tag == .linux;
 
     const c_flags = if (use_mimalloc)
+        if (enable_hardening)
+            &[_][]const u8{
+                "-std=c23",
+                "-Wall",
+                "-Wextra",
+                "-Wpedantic",
+                "-Werror",
+                "-DUSE_MIMALLOC=1",
+                "-fstack-protector-strong",
+                "-D_FORTIFY_SOURCE=3",
+                "-fPIE",
+            }
+        else
+            &[_][]const u8{
+                "-std=c23",
+                "-Wall",
+                "-Wextra",
+                "-Wpedantic",
+                "-Werror",
+                "-DUSE_MIMALLOC=1",
+            }
+    else if (enable_hardening)
         &[_][]const u8{
             "-std=c23",
             "-Wall",
             "-Wextra",
             "-Wpedantic",
             "-Werror",
-            "-DUSE_MIMALLOC=1",
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=3",
+            "-fPIE",
         }
     else
         &[_][]const u8{
@@ -61,20 +86,53 @@ pub fn build(b: *std.Build) void {
             "-Wpedantic",
             "-Werror",
         };
-    const ulog_c_flags = &[_][]const u8{
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-Wpedantic",
-        "-Werror",
-        "-DULOG_BUILD_DYNAMIC_CONFIG=1",
-    };
+    const ulog_c_flags = if (enable_hardening)
+        &[_][]const u8{
+            "-std=c23",
+            "-Wall",
+            "-Wextra",
+            "-Wpedantic",
+            "-Werror",
+            "-DULOG_BUILD_DYNAMIC_CONFIG=1",
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=3",
+            "-fPIE",
+        }
+    else
+        &[_][]const u8{
+            "-std=c23",
+            "-Wall",
+            "-Wextra",
+            "-Wpedantic",
+            "-Werror",
+            "-DULOG_BUILD_DYNAMIC_CONFIG=1",
+        };
     const hiredis_c_flags = if (use_mimalloc)
+        if (enable_hardening)
+            &[_][]const u8{
+                "-std=c23",
+                "-D_DEFAULT_SOURCE",
+                "-D_POSIX_C_SOURCE=200809L",
+                "-DHIREDIS_USE_MIMALLOC=1",
+                "-fstack-protector-strong",
+                "-D_FORTIFY_SOURCE=3",
+                "-fPIE",
+            }
+        else
+            &[_][]const u8{
+                "-std=c23",
+                "-D_DEFAULT_SOURCE",
+                "-D_POSIX_C_SOURCE=200809L",
+                "-DHIREDIS_USE_MIMALLOC=1",
+            }
+    else if (enable_hardening)
         &[_][]const u8{
             "-std=c23",
             "-D_DEFAULT_SOURCE",
             "-D_POSIX_C_SOURCE=200809L",
-            "-DHIREDIS_USE_MIMALLOC=1",
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=3",
+            "-fPIE",
         }
     else
         &[_][]const u8{
@@ -82,18 +140,49 @@ pub fn build(b: *std.Build) void {
             "-D_DEFAULT_SOURCE",
             "-D_POSIX_C_SOURCE=200809L",
         };
-    const rabbitmq_c_flags = &[_][]const u8{
-        "-std=c23",
-        "-D_DEFAULT_SOURCE",
-        "-D_POSIX_C_SOURCE=200809L",
-        "-DHAVE_POLL",
-    };
-    const jsonrpc_c_flags = if (use_mimalloc)
+    const rabbitmq_c_flags = if (enable_hardening)
         &[_][]const u8{
             "-std=c23",
             "-D_DEFAULT_SOURCE",
             "-D_POSIX_C_SOURCE=200809L",
-            "-DUSE_MIMALLOC=1",
+            "-DHAVE_POLL",
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=3",
+            "-fPIE",
+        }
+    else
+        &[_][]const u8{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE",
+            "-D_POSIX_C_SOURCE=200809L",
+            "-DHAVE_POLL",
+        };
+    const jsonrpc_c_flags = if (use_mimalloc)
+        if (enable_hardening)
+            &[_][]const u8{
+                "-std=c23",
+                "-D_DEFAULT_SOURCE",
+                "-D_POSIX_C_SOURCE=200809L",
+                "-DUSE_MIMALLOC=1",
+                "-fstack-protector-strong",
+                "-D_FORTIFY_SOURCE=3",
+                "-fPIE",
+            }
+        else
+            &[_][]const u8{
+                "-std=c23",
+                "-D_DEFAULT_SOURCE",
+                "-D_POSIX_C_SOURCE=200809L",
+                "-DUSE_MIMALLOC=1",
+            }
+    else if (enable_hardening)
+        &[_][]const u8{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE",
+            "-D_POSIX_C_SOURCE=200809L",
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=3",
+            "-fPIE",
         }
     else
         &[_][]const u8{
@@ -180,6 +269,11 @@ pub fn build(b: *std.Build) void {
         .name = "eth_mempool_monitor",
         .root_module = monitor_module,
     });
+    if (enable_hardening) {
+        monitor.pie = true;
+        monitor.link_z_relro = true;
+        monitor.link_z_lazy = false;
+    }
     monitor.linkLibrary(lib);
     monitor.linkSystemLibrary("wolfssl");
     if (use_mimalloc) {
@@ -220,6 +314,11 @@ pub fn build(b: *std.Build) void {
         .name = "rabbitmq_tx_console",
         .root_module = rabbitmq_console_module,
     });
+    if (enable_hardening) {
+        rabbitmq_console.pie = true;
+        rabbitmq_console.link_z_relro = true;
+        rabbitmq_console.link_z_lazy = false;
+    }
     rabbitmq_console.linkSystemLibrary("wolfssl");
     if (use_mimalloc) {
         rabbitmq_console.linkSystemLibrary("mimalloc");
@@ -263,6 +362,11 @@ pub fn build(b: *std.Build) void {
         .name = "rpc_control",
         .root_module = rpc_control_module,
     });
+    if (enable_hardening) {
+        rpc_control.pie = true;
+        rpc_control.link_z_relro = true;
+        rpc_control.link_z_lazy = false;
+    }
     rpc_control.linkSystemLibrary("uv");
     if (use_mimalloc) {
         rpc_control.linkSystemLibrary("mimalloc");

@@ -30,9 +30,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <wolfssl/options.h>
 #include <wolfssl/openssl/err.h>
 #include <wolfssl/openssl/ssl.h>
+#include <wolfssl/options.h>
 
 #include <assert.h>
 #include <errno.h>

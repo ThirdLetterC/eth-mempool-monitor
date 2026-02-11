@@ -13,7 +13,7 @@
  */
 [[nodiscard]] bool ws_subscriber_listen(ws_client_t *client);
 
-typedef bool (*ws_subscriber_stop_check_fn)(void);
+typedef bool (*ws_subscriber_stop_check_fn)();
 
 typedef struct ws_subscriber_redis_config ws_subscriber_redis_config_t;
 struct ws_subscriber_redis_config {

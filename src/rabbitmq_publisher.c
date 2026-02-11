@@ -6,6 +6,7 @@
 #include "ulog/ulog.h"
 
 #include <inttypes.h>
+#include <stdckdint.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,8 +61,8 @@ struct ws_rabbitmq_publisher {
 
 [[nodiscard]] static bool
 ws_rabbitmq_wait_for_publish_confirm(ws_rabbitmq_publisher_t *publisher);
-[[nodiscard]] static bool ws_rabbitmq_connect(
-    ws_rabbitmq_publisher_t *publisher);
+[[nodiscard]] static bool
+ws_rabbitmq_connect(ws_rabbitmq_publisher_t *publisher);
 
 static void ws_rabbitmq_log_rpc_failure(const char *action,
                                         amqp_rpc_reply_t reply) {
@@ -217,8 +218,14 @@ static void ws_rabbitmq_disconnect(ws_rabbitmq_publisher_t *publisher) {
   if (text == nullptr) {
     return nullptr;
   }
+
   size_t len = strlen(text);
-  char *copy = calloc(len + 1, sizeof(char));
+  size_t allocation_length = 0;
+  if (ckd_add(&allocation_length, len, (size_t)1)) {
+    return nullptr;
+  }
+
+  char *copy = calloc(allocation_length, sizeof(char));
   if (copy == nullptr) {
     return nullptr;
   }
@@ -270,8 +277,9 @@ static void ws_rabbitmq_clear_replay_queue(ws_rabbitmq_publisher_t *publisher) {
   publisher->replay_head = 0;
 }
 
-[[nodiscard]] static bool ws_rabbitmq_reserve_replay_capacity(
-    ws_rabbitmq_publisher_t *publisher, size_t new_capacity) {
+[[nodiscard]] static bool
+ws_rabbitmq_reserve_replay_capacity(ws_rabbitmq_publisher_t *publisher,
+                                    size_t new_capacity) {
   if (publisher == nullptr) {
     return false;
   }
@@ -282,9 +290,8 @@ static void ws_rabbitmq_clear_replay_queue(ws_rabbitmq_publisher_t *publisher) {
     return false;
   }
 
-  auto resized =
-      (ws_rabbitmq_replay_message_t *)calloc(new_capacity,
-                                             sizeof(*publisher->replay_queue));
+  auto resized = (ws_rabbitmq_replay_message_t *)calloc(
+      new_capacity, sizeof(*publisher->replay_queue));
   if (resized == nullptr) {
     return false;
   }
@@ -332,11 +339,12 @@ ws_rabbitmq_enqueue_replay_message(ws_rabbitmq_publisher_t *publisher,
     return false;
   }
 
-  if (payload_length >= SIZE_MAX) {
+  size_t payload_capacity = 0;
+  if (ckd_add(&payload_capacity, payload_length, (size_t)1)) {
     return false;
   }
 
-  char *payload_copy = calloc(payload_length + 1, sizeof(char));
+  char *payload_copy = calloc(payload_capacity, sizeof(char));
   if (payload_copy == nullptr) {
     ulog_error("Failed to allocate replay payload copy");
     return false;
@@ -370,12 +378,10 @@ ws_rabbitmq_enqueue_replay_message(ws_rabbitmq_publisher_t *publisher,
     publisher->replay_queue_dropped_messages = 0;
   }
 
-  size_t index =
-      (publisher->replay_head + publisher->replay_count) %
-      publisher->replay_capacity;
-  publisher->replay_queue[index] =
-      (ws_rabbitmq_replay_message_t){.payload = payload_copy,
-                                     .payload_length = payload_length};
+  size_t index = (publisher->replay_head + publisher->replay_count) %
+                 publisher->replay_capacity;
+  publisher->replay_queue[index] = (ws_rabbitmq_replay_message_t){
+      .payload = payload_copy, .payload_length = payload_length};
   publisher->replay_count += 1;
   return true;
 }
@@ -401,9 +407,9 @@ static void ws_rabbitmq_drop_replay_head(ws_rabbitmq_publisher_t *publisher) {
   }
 }
 
-[[nodiscard]] static bool ws_rabbitmq_publish_single(
-    ws_rabbitmq_publisher_t *publisher, const char *payload,
-    size_t payload_length) {
+[[nodiscard]] static bool
+ws_rabbitmq_publish_single(ws_rabbitmq_publisher_t *publisher,
+                           const char *payload, size_t payload_length) {
   if (publisher == nullptr || payload == nullptr) {
     return false;
   }
@@ -417,7 +423,8 @@ static void ws_rabbitmq_drop_replay_head(ws_rabbitmq_publisher_t *publisher) {
       publisher->queue_bytes, false, false, &publisher->publish_properties,
       amqp_bytes_from_buffer(payload, payload_length));
   if (publish_status != AMQP_STATUS_OK) {
-    ulog_error("RabbitMQ publish failed: %s", amqp_error_string2(publish_status));
+    ulog_error("RabbitMQ publish failed: %s",
+               amqp_error_string2(publish_status));
     ws_rabbitmq_disconnect(publisher);
     return false;
   }

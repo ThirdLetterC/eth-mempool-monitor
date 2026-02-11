@@ -11,6 +11,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdckdint.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -196,7 +197,12 @@ static void app_print_usage(const char *program_name) {
   }
 
   size_t len = strlen(text);
-  char *copy = calloc(len + 1, sizeof(char));
+  size_t allocation_length = 0;
+  if (ckd_add(&allocation_length, len, (size_t)1)) {
+    return nullptr;
+  }
+
+  char *copy = calloc(allocation_length, sizeof(char));
   if (copy == nullptr) {
     return nullptr;
   }
@@ -1197,7 +1203,14 @@ static void app_handle_payload(const void *body, size_t body_length) {
     return;
   }
 
-  char *payload = calloc(body_length + 1, sizeof(char));
+  size_t payload_capacity = 0;
+  if (ckd_add(&payload_capacity, body_length, (size_t)1)) {
+    ulog_error("Out of memory while copying RabbitMQ payload (%zu bytes)\n",
+               body_length);
+    return;
+  }
+
+  char *payload = calloc(payload_capacity, sizeof(char));
   if (payload == nullptr) {
     ulog_error("Out of memory while copying RabbitMQ payload (%zu bytes)\n",
                body_length);

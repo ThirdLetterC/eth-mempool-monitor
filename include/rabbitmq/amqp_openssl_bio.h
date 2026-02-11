@@ -7,9 +7,9 @@
 // Use OpenSSL v1.1.1 API.
 #define OPENSSL_API_COMPAT 10101
 
-#include <wolfssl/options.h>
 #include <wolfssl/openssl/bio.h>
 #include <wolfssl/openssl/ssl.h>
+#include <wolfssl/options.h>
 
 int amqp_openssl_bio_init();
 
