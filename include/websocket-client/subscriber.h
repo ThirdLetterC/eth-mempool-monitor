@@ -1,5 +1,4 @@
-#ifndef WEBSOCKET_CLIENT_SUBSCRIBER_H
-#define WEBSOCKET_CLIENT_SUBSCRIBER_H
+#pragma once
 
 #include "websocket-client/rabbitmq_publisher.h"
 #include "websocket-client/ws_client.h"
@@ -79,5 +78,3 @@ void ws_subscriber_set_stop_check(ws_subscriber_stop_check_fn stop_check);
     const ws_subscriber_redis_config_t *redis_config,
     const ws_rabbitmq_config_t *rabbitmq_config, uint32_t read_timeout_seconds,
     uint32_t write_timeout_seconds);
-
-#endif

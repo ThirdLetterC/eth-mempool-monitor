@@ -1,5 +1,4 @@
-#ifndef WEBSOCKET_CLIENT_RABBITMQ_PUBLISHER_H
-#define WEBSOCKET_CLIENT_RABBITMQ_PUBLISHER_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -37,5 +36,3 @@ ws_rabbitmq_publisher_publish(ws_rabbitmq_publisher_t *publisher,
  * @brief Closes RabbitMQ channel and connection.
  */
 void ws_rabbitmq_publisher_destroy(ws_rabbitmq_publisher_t *publisher);
-
-#endif
