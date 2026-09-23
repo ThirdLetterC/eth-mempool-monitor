@@ -43,6 +43,7 @@ struct ws_rabbitmq_publisher {
   /* Bounded ring buffer used to preserve messages across reconnects. */
   ws_rabbitmq_replay_message_t *replay_queue;
   size_t replay_count;
+  size_t replay_bytes;
   size_t replay_capacity;
   size_t replay_head;
   uint64_t retry_not_before_ms;

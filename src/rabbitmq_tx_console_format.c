@@ -9,6 +9,7 @@
 
 constexpr uint64_t APP_WEI_PER_GWEI = 1'000'000'000ULL;
 constexpr uint64_t APP_WEI_PER_ETH = 1'000'000'000'000'000'000ULL;
+constexpr size_t APP_MAX_PAYLOAD_BYTES = 1 * 1'024 * 1'024;
 
 /*
  * Transaction-event presentation layer.
@@ -253,6 +254,11 @@ static void app_print_transaction_summary(const JSON_Object *event) {
 void app_handle_payload(const void *body, size_t body_length) {
   if (body_length > 0 && body == nullptr) {
     ulog_error("Skipping message with null payload pointer\n");
+    return;
+  }
+  if (body_length > APP_MAX_PAYLOAD_BYTES) {
+    ulog_error("Skipping oversized RabbitMQ payload (%zu bytes; limit=%zu)\n",
+               body_length, APP_MAX_PAYLOAD_BYTES);
     return;
   }
 

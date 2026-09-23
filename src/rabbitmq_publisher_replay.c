@@ -10,6 +10,7 @@
 #include <time.h>
 
 constexpr size_t WS_RABBITMQ_MAX_REPLAY_MESSAGES = 4'096;
+constexpr size_t WS_RABBITMQ_MAX_REPLAY_BYTES = 64 * 1'024 * 1'024;
 constexpr uint32_t WS_RABBITMQ_RETRY_INITIAL_BACKOFF_MS = 1'000;
 constexpr uint32_t WS_RABBITMQ_RETRY_MAX_BACKOFF_MS = 60'000;
 
@@ -101,6 +102,7 @@ void ws_rabbitmq_replay_clear(ws_rabbitmq_publisher_t *publisher) {
     free(publisher->replay_queue);
     publisher->replay_queue = nullptr;
     publisher->replay_count = 0;
+    publisher->replay_bytes = 0;
     publisher->replay_head = 0;
     return;
   }
@@ -111,6 +113,7 @@ void ws_rabbitmq_replay_clear(ws_rabbitmq_publisher_t *publisher) {
   free(publisher->replay_queue);
   publisher->replay_queue = nullptr;
   publisher->replay_count = 0;
+  publisher->replay_bytes = 0;
   publisher->replay_capacity = 0;
   publisher->replay_head = 0;
 }
@@ -163,15 +166,22 @@ ws_rabbitmq_replay_enqueue(ws_rabbitmq_publisher_t *publisher,
     return false;
   }
 
-  if (publisher->replay_count >= WS_RABBITMQ_MAX_REPLAY_MESSAGES) {
+  size_t next_replay_bytes = 0;
+  bool byte_limit_exceeded =
+      ckd_add(&next_replay_bytes, publisher->replay_bytes, payload_length) ||
+      next_replay_bytes > WS_RABBITMQ_MAX_REPLAY_BYTES;
+  if (publisher->replay_count >= WS_RABBITMQ_MAX_REPLAY_MESSAGES ||
+      byte_limit_exceeded) {
     if (publisher->replay_queue_dropped_messages < UINT64_MAX) {
       publisher->replay_queue_dropped_messages += 1;
     }
     if (!publisher->replay_queue_full_logged) {
       ulog_error(
-          "RabbitMQ replay queue is full (%zu messages), dropping publishes "
-          "until broker recovers",
-          publisher->replay_count);
+          "RabbitMQ replay queue limit reached (%zu messages, %zu bytes; "
+          "limits=%zu messages/%zu bytes), dropping publishes until broker "
+          "recovers",
+          publisher->replay_count, publisher->replay_bytes,
+          WS_RABBITMQ_MAX_REPLAY_MESSAGES, WS_RABBITMQ_MAX_REPLAY_BYTES);
       publisher->replay_queue_full_logged = true;
     }
     return false;
@@ -221,6 +231,7 @@ ws_rabbitmq_replay_enqueue(ws_rabbitmq_publisher_t *publisher,
   publisher->replay_queue[index] = (ws_rabbitmq_replay_message_t){
       .payload = payload_copy, .payload_length = payload_length};
   publisher->replay_count += 1;
+  publisher->replay_bytes = next_replay_bytes;
   return true;
 }
 
@@ -230,18 +241,24 @@ static void ws_rabbitmq_drop_replay_head(ws_rabbitmq_publisher_t *publisher) {
     return;
   }
 
+  size_t payload_length =
+      publisher->replay_queue[publisher->replay_head].payload_length;
   free(publisher->replay_queue[publisher->replay_head].payload);
   publisher->replay_queue[publisher->replay_head] =
       (ws_rabbitmq_replay_message_t){0};
   publisher->replay_head =
       (publisher->replay_head + 1) % publisher->replay_capacity;
   publisher->replay_count -= 1;
+  publisher->replay_bytes = payload_length <= publisher->replay_bytes
+                                ? publisher->replay_bytes - payload_length
+                                : 0;
 
   if (publisher->replay_count == 0) {
     free(publisher->replay_queue);
     publisher->replay_queue = nullptr;
     publisher->replay_capacity = 0;
     publisher->replay_head = 0;
+    publisher->replay_bytes = 0;
   }
 }
 

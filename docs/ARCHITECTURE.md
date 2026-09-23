@@ -74,7 +74,13 @@ can dominate at `O(n + p + q + sum(payload_i))`.
 
 Fixed storage includes the 64 KiB receive buffer and 1024 lookup entries.
 Dynamic storage is dominated by parsed JSON (`O(n)`), serialized events (`O(t)`),
-and up to 4096 queued replay payloads (`O(sum(payload_i))`).
+and queued replay payloads. The replay queue is capped at both 4096 messages and
+64 MiB of payload data.
+
+The RPC server accepts at most 256 concurrent clients. Each client may queue at
+most 64 writes or 512 KiB of response data before the connection is closed.
+The RabbitMQ console rejects payloads larger than 1 MiB before copying or
+parsing them.
 
 ## Dependencies
 

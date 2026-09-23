@@ -1,6 +1,7 @@
 #include <limits.h>
 #include <signal.h>
 #include <stddef.h>
+#include <stdckdint.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,13 +15,18 @@
 
 constexpr size_t READ_CHUNK_MIN = 1'024;
 constexpr size_t READ_CHUNK_MAX = 4'096;
+constexpr size_t SERVER_MAX_CLIENTS = 256;
+constexpr size_t SERVER_MAX_PENDING_WRITES_PER_CLIENT = 64;
+constexpr size_t SERVER_MAX_PENDING_WRITE_BYTES_PER_CLIENT = 512 * 1'024;
 constexpr int32_t SERVER_DEFAULT_BACKLOG = 4'096;
 constexpr char SERVER_DEFAULT_HOST[] = "0.0.0.0";
 static uv_loop_t *g_loop = nullptr;
 static uv_tcp_t g_server;
 static bool g_shutdown_requested = false;
+static size_t g_active_client_count = 0;
 
 static void on_uv_client_closed(uv_handle_t *handle);
+static void transport_close(jsonrpc_transport_t *self);
 
 static void close_handle(uv_handle_t *handle, void *arg [[maybe_unused]]) {
   if (!uv_is_closing(handle)) {
@@ -32,21 +38,28 @@ static void close_handle(uv_handle_t *handle, void *arg [[maybe_unused]]) {
   }
 }
 
+typedef struct client_ctx client_ctx_t;
+
 typedef struct {
   uv_write_t req;
+  client_ctx_t *client;
+  size_t data_length;
   uint8_t data[];
 } write_ctx_t;
 
 /**
  * @brief Internal wrapper linking the protocol and libuv handle.
  */
-typedef struct {
+struct client_ctx {
   uv_tcp_t tcp;
   jsonrpc_conn_t *rpc;
   jsonrpc_transport_t transport;
   uint8_t *read_buffer;
   size_t read_capacity;
-} client_ctx_t;
+  size_t pending_write_count;
+  size_t pending_write_bytes;
+  bool counted_active;
+};
 
 static jsonrpc_callbacks_t g_callbacks = {.on_open = nullptr,
                                           .on_close = nullptr,
@@ -76,6 +89,15 @@ static void on_uv_write(uv_write_t *req, int status [[maybe_unused]]) {
     ulog_debug("[jsonrpc-server] uv_write callback status=%d", status);
   }
   auto ctx = (write_ctx_t *)req;
+  if (ctx->client != nullptr) {
+    if (ctx->client->pending_write_count > 0) {
+      ctx->client->pending_write_count -= 1;
+    }
+    ctx->client->pending_write_bytes =
+        ctx->data_length <= ctx->client->pending_write_bytes
+            ? ctx->client->pending_write_bytes - ctx->data_length
+            : 0;
+  }
   free(ctx);
 }
 
@@ -94,6 +116,17 @@ static void transport_send_raw(jsonrpc_transport_t *self, const uint8_t *data,
     return;
   }
 
+  size_t next_pending_write_bytes = 0;
+  if (ctx->pending_write_count >= SERVER_MAX_PENDING_WRITES_PER_CLIENT ||
+      ckd_add(&next_pending_write_bytes, ctx->pending_write_bytes, len) ||
+      next_pending_write_bytes > SERVER_MAX_PENDING_WRITE_BYTES_PER_CLIENT) {
+    ulog_warn("[jsonrpc-server] closing client with excessive queued output "
+              "(writes=%zu bytes=%zu)",
+              ctx->pending_write_count, ctx->pending_write_bytes);
+    transport_close(self);
+    return;
+  }
+
   if (len > SIZE_MAX - sizeof(write_ctx_t)) {
     return;
   }
@@ -105,6 +138,8 @@ static void transport_send_raw(jsonrpc_transport_t *self, const uint8_t *data,
     return;
   }
 
+  write_ctx->client = ctx;
+  write_ctx->data_length = len;
   memcpy(write_ctx->data, data, len);
 
   uv_buf_t buf = uv_buf_init((char *)write_ctx->data, (unsigned int)len);
@@ -116,7 +151,10 @@ static void transport_send_raw(jsonrpc_transport_t *self, const uint8_t *data,
                uv_strerror(write_status));
     fprintf(stderr, "uv_write failed: %s\n", uv_strerror(write_status));
     free(write_ctx);
+    return;
   }
+  ctx->pending_write_count += 1;
+  ctx->pending_write_bytes = next_pending_write_bytes;
 }
 
 static void on_uv_client_closed(uv_handle_t *handle) {
@@ -130,6 +168,12 @@ static void on_uv_client_closed(uv_handle_t *handle) {
   }
   ulog_debug("[jsonrpc-server] client closed");
 
+  if (ctx->counted_active) {
+    if (g_active_client_count > 0) {
+      g_active_client_count -= 1;
+    }
+    ctx->counted_active = false;
+  }
   handle->data = nullptr;
   if (ctx->rpc != nullptr) {
     jsonrpc_conn_free(ctx->rpc);
@@ -225,6 +269,15 @@ static void on_new_connection(uv_stream_t *server, int status) {
   ctx->tcp.data = ctx;
 
   if (uv_accept(server, (uv_stream_t *)&ctx->tcp) == 0) {
+    if (g_active_client_count >= SERVER_MAX_CLIENTS) {
+      ulog_warn("[jsonrpc-server] rejecting connection at client limit (%zu)",
+                SERVER_MAX_CLIENTS);
+      uv_close((uv_handle_t *)&ctx->tcp, on_uv_client_closed);
+      return;
+    }
+    g_active_client_count += 1;
+    ctx->counted_active = true;
+
     ctx->transport.user_data = ctx;
     ctx->transport.send_raw = transport_send_raw;
     ctx->transport.close = transport_close;
@@ -259,6 +312,7 @@ void start_jsonrpc_server(const char *host, int32_t port, int32_t backlog,
   (void)signal(SIGPIPE, SIG_IGN);
 
   g_shutdown_requested = false;
+  g_active_client_count = 0;
   g_loop = uv_default_loop();
   if (g_loop == nullptr) {
     ulog_error("[jsonrpc-server] uv_default_loop failed");
