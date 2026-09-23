@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libc6-dev \
+            libuv1-dev \
+            libwolfssl-dev \
+            pkg-config
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+      - name: Build release binaries
+        run: zig build -Drelease=true -Dstrip=true -Dmimalloc=true
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          install -m 0755 zig-out/bin/eth_mempool_monitor \
+            release-assets/eth_mempool_monitor-linux-x86_64
+          install -m 0755 zig-out/bin/rabbitmq_tx_console \
+            release-assets/rabbitmq_tx_console-linux-x86_64
+          install -m 0755 zig-out/bin/rpc_control \
+            release-assets/rpc_control-linux-x86_64
+          cd release-assets
+          sha256sum ./* > SHA256SUMS
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" release-assets/* \
+              --generate-notes \
+              --title "${GITHUB_REF_NAME}" \
+              --verify-tag
+          fi
