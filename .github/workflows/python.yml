@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "**/*.py"
+      - "compose*.yml"
       - "docs/PYTHON_CLIENT.md"
       - "pyproject.toml"
       - "uv.lock"
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - "**/*.py"
+      - "compose*.yml"
       - "docs/PYTHON_CLIENT.md"
       - "pyproject.toml"
       - "uv.lock"
@@ -49,6 +51,7 @@ jobs:
         run: |
           uv run --frozen ruff format --check .
           uv run --frozen mdformat --check docs/PYTHON_CLIENT.md
+          uv run --frozen yamlfix --check compose.yml compose.prod.yml
 
       - name: Lint
         run: uv run --frozen ruff check .

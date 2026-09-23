@@ -22,7 +22,6 @@ services:
     cpus: "0.50"
     mem_limit: 6m
     mem_reservation: 6m
-
   eth_mempool_monitor:
     image: eth-mempool-monitor:latest
     container_name: eth_mempool_monitor
@@ -46,7 +45,6 @@ services:
     cpus: "1.00"
     mem_limit: 6m
     mem_reservation: 6m
-
   valkey:
     image: valkey/valkey:latest
     container_name: valkey
@@ -73,7 +71,10 @@ services:
       - --lazyfree-lazy-user-del
       - "yes"
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
+      test:
+        - "CMD"
+        - "valkey-cli"
+        - "ping"
       interval: 5s
       timeout: 3s
       retries: 20
@@ -81,7 +82,6 @@ services:
     cpus: "1.00"
     mem_limit: 20m
     mem_reservation: 20m
-
   rabbitmq:
     image: rabbitmq:3
     container_name: rabbitmq
@@ -106,7 +106,11 @@ services:
         rabbitmq-plugins disable --offline rabbitmq_federation rabbitmq_prometheus rabbitmq_web_dispatch
         exec rabbitmq-server
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test:
+        - "CMD"
+        - "rabbitmq-diagnostics"
+        - "-q"
+        - "ping"
       interval: 10s
       timeout: 5s
       retries: 20

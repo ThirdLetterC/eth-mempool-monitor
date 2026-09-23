@@ -42,5 +42,6 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
       - ./conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./conf/rabbitmq-advanced.config:/etc/rabbitmq/advanced.config:ro
+
 volumes:
   rabbitmq-data:
