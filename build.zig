@@ -296,6 +296,8 @@ pub fn build(b: *std.Build) void {
     monitor_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher_connection.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher_replay.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_config.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_runtime.c"), .flags = c_flags });
@@ -347,6 +349,9 @@ pub fn build(b: *std.Build) void {
     rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
     rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
     rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console.c"), .flags = c_flags });
+    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console_config.c"), .flags = c_flags });
+    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console_consumer.c"), .flags = c_flags });
+    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console_format.c"), .flags = c_flags });
     if (mimalloc_dependency) |dependency| {
         rabbitmq_console_module.addIncludePath(dependency.path("include"));
     }
