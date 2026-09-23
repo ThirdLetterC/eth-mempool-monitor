@@ -35,6 +35,7 @@ python-check:
     uv run --frozen mdformat --check docs/PYTHON_CLIENT.md
     uv run --frozen yamlfix --check compose.yml compose.prod.yml
     uv run --frozen pyright
+    uv run --frozen python -m unittest discover -s tests
 
 valgrind-rpc-control *args:
     zig build -Dvalgrind=true valgrind-rpc-control -- {{args}}

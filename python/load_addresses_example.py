@@ -10,8 +10,10 @@ Example:
     python3 python/load_addresses_example.py conf/addresses.txt 127.0.0.1 8080 my-secret-token
 """
 
+import argparse
 import os
 import sys
+from typing import Any, Optional
 
 if __package__:
     from .rpc_client import RPCClient, RPCError
@@ -19,7 +21,7 @@ else:
     from rpc_client import RPCClient, RPCError
 
 
-def _extract_count(count_result):
+def _extract_count(count_result: Any) -> int:
     """
     Normalize monitor_count() response into an integer count.
 
@@ -42,7 +44,12 @@ def _extract_count(count_result):
         raise ValueError(f"Invalid monitor_count response: {count_result}") from exc
 
 
-def load_and_monitor_addresses(filepath, host="127.0.0.1", port=8080, auth_token=None):
+def load_and_monitor_addresses(
+    filepath: str,
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    auth_token: Optional[str] = None,
+) -> bool:
     """
     Load addresses from a file and add them to the monitoring set.
 
@@ -99,40 +106,32 @@ def load_and_monitor_addresses(filepath, host="127.0.0.1", port=8080, auth_token
 
             return True
 
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return False
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return False
-    except ConnectionError as e:
-        print(f"Error: Cannot connect to RPC server: {e}", file=sys.stderr)
+    except ConnectionError as exc:
+        print(f"Error: Cannot connect to RPC server: {exc}", file=sys.stderr)
         print("\nMake sure the rpc_control server is running:", file=sys.stderr)
         print("  zig build run-rpc-control -- --config conf/config.toml", file=sys.stderr)
         return False
-    except RPCError as e:
-        print(f"Error: RPC operation failed: {e}", file=sys.stderr)
-        return False
-    except Exception as e:
-        print(f"Error: Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
+    except RPCError as exc:
+        print(f"Error: RPC operation failed: {exc}", file=sys.stderr)
         return False
 
 
-def main():
+def main() -> None:
     """Main entry point."""
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("filepath", help="file containing one Ethereum address per line")
+    parser.add_argument("host", nargs="?", default="127.0.0.1", help="RPC server host")
+    parser.add_argument("port", nargs="?", type=int, default=8080, help="RPC server port")
+    parser.add_argument("auth_token", nargs="?", help="RPC authentication token")
+    args = parser.parse_args()
 
-    filepath = sys.argv[1]
-    host = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
-    port = int(sys.argv[3]) if len(sys.argv) > 3 else 8080
-    auth_token = sys.argv[4] if len(sys.argv) > 4 else None
-
-    success = load_and_monitor_addresses(filepath, host, port, auth_token)
+    success = load_and_monitor_addresses(args.filepath, args.host, args.port, args.auth_token)
     sys.exit(0 if success else 1)
 
 

@@ -42,7 +42,7 @@ sequence_style = "block_style"
 
 [tool.pyright]
 exclude = ["**/__pycache__"]
-include = ["python"]
+include = ["python", "tests"]
 pythonVersion = "3.9"
 reportUnnecessaryCast = "warning"
 reportUnnecessaryComparison = "warning"

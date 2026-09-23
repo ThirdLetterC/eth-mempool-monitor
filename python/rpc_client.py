@@ -32,17 +32,31 @@ Usage:
 
 import json
 import socket
+from contextlib import suppress
+from math import isfinite
+from pathlib import Path
+from threading import Lock
+from types import TracebackType
 from typing import Any, Optional, Union
+
+DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+AddressInput = Union[str, list[str]]
+JsonObject = dict[str, Any]
 
 
 class RPCError(Exception):
     """Exception raised when the RPC server returns an error."""
 
-    def __init__(self, code: int, message: str, data: Optional[Any] = None):
+    def __init__(self, code: int, message: str, data: Optional[Any] = None) -> None:
         self.code = code
         self.message = message
         self.data = data
         super().__init__(f"RPC Error {code}: {message}")
+
+
+class RPCProtocolError(ValueError):
+    """Raised when the server returns an invalid JSON-RPC response."""
 
 
 class RPCClient:
@@ -59,7 +73,8 @@ class RPCClient:
         port: int = 8080,
         timeout: float = 30.0,
         auth_token: Optional[str] = None,
-    ):
+        max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    ) -> None:
         """
         Initialize the RPC client.
 
@@ -68,17 +83,34 @@ class RPCClient:
             port: The port number of the RPC server
             timeout: Socket timeout in seconds
             auth_token: Optional authentication token for rpc_control auth method
+            max_response_bytes: Maximum accepted newline-delimited response size
         """
+        if not isinstance(host, str) or not host:
+            raise ValueError("host must be a non-empty string")
+        if type(port) is not int or not 1 <= port <= 65_535:
+            raise ValueError("port must be between 1 and 65535")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("timeout must be greater than zero")
+        if type(max_response_bytes) is not int or max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be greater than zero")
+
         self.host = host
         self.port = port
-        self.timeout = timeout
-        self.auth_token = auth_token
+        self.timeout = float(timeout)
+        self.max_response_bytes = max_response_bytes
         self._socket: Optional[socket.socket] = None
+        self._receive_buffer = bytearray()
         self._request_id = 0
+        self._request_lock = Lock()
         self._connect()
-        if self.auth_token:
+        if auth_token:
             try:
-                self.authenticate(self.auth_token)
+                self.authenticate(auth_token)
             except Exception:
                 self.close()
                 raise
@@ -86,10 +118,10 @@ class RPCClient:
     def _connect(self) -> None:
         """Establish a connection to the RPC server."""
         try:
-            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._socket = socket.create_connection((self.host, self.port), timeout=self.timeout)
             self._socket.settimeout(self.timeout)
-            self._socket.connect((self.host, self.port))
         except OSError as exc:
+            self.close()
             raise ConnectionError(f"Failed to connect to {self.host}:{self.port}: {exc}") from exc
 
     def _get_next_id(self) -> int:
@@ -97,7 +129,44 @@ class RPCClient:
         self._request_id += 1
         return self._request_id
 
-    def _send_request(self, method: str, params: Optional[Union[dict, list, str]] = None) -> Any:
+    def _receive_line(self) -> bytes:
+        """Read one bounded newline-delimited response, retaining any trailing bytes."""
+        if self._socket is None:
+            raise ConnectionError("Not connected to RPC server")
+
+        while True:
+            newline_index = self._receive_buffer.find(b"\n")
+            if newline_index >= 0:
+                if newline_index > self.max_response_bytes:
+                    self.close()
+                    raise RPCProtocolError("RPC response exceeds configured size limit")
+                response = bytes(self._receive_buffer[:newline_index])
+                del self._receive_buffer[: newline_index + 1]
+                return response
+
+            if len(self._receive_buffer) > self.max_response_bytes:
+                self.close()
+                raise RPCProtocolError("RPC response exceeds configured size limit")
+
+            try:
+                chunk = self._socket.recv(4096)
+            except socket.timeout as exc:
+                self.close()
+                raise ConnectionError("Request timed out") from exc
+            except OSError as exc:
+                self.close()
+                raise ConnectionError(f"Failed to receive response: {exc}") from exc
+
+            if not chunk:
+                self.close()
+                raise ConnectionError("Connection closed by server")
+            self._receive_buffer.extend(chunk)
+
+    def _send_request(
+        self,
+        method: str,
+        params: Optional[Union[dict[str, Any], list[Any], str]] = None,
+    ) -> Any:
         """
         Send a JSON-RPC request and return the result.
 
@@ -112,54 +181,101 @@ class RPCClient:
             RPCError: If the server returns an error
             ConnectionError: If there's a connection issue
         """
-        if self._socket is None:
-            raise ConnectionError("Not connected to RPC server")
+        with self._request_lock:
+            if self._socket is None:
+                raise ConnectionError("Not connected to RPC server")
+            if not method:
+                raise ValueError("method must be a non-empty string")
 
-        # Build the JSON-RPC 2.0 request
-        request: dict[str, Any] = {"jsonrpc": "2.0", "id": self._get_next_id(), "method": method}
+            request_id = self._get_next_id()
+            request: dict[str, Any] = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+            }
+            if params is not None:
+                request["params"] = params
 
-        if params is not None:
-            request["params"] = params
+            request_data = json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n"
+            try:
+                self._socket.sendall(request_data)
+            except OSError as exc:
+                self.close()
+                raise ConnectionError(f"Failed to send request: {exc}") from exc
 
-        # Serialize and send the request (newline-delimited)
-        request_str = json.dumps(request) + "\n"
+            response_data = self._receive_line()
+            try:
+                response = json.loads(response_data.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RPCProtocolError(f"Invalid JSON response: {exc}") from exc
 
-        try:
-            self._socket.sendall(request_str.encode("utf-8"))
-        except OSError as exc:
-            raise ConnectionError(f"Failed to send request: {exc}") from exc
+            if not isinstance(response, dict):
+                raise RPCProtocolError("JSON-RPC response must be an object")
+            if response.get("jsonrpc") != "2.0":
+                raise RPCProtocolError("JSON-RPC response has an invalid version")
+            response_id = response.get("id")
+            if type(response_id) is not int or response_id != request_id:
+                raise RPCProtocolError(
+                    f"JSON-RPC response ID mismatch: expected {request_id}, got {response_id!r}"
+                )
 
-        # Receive and parse the response
-        try:
-            response_data = b""
-            while True:
-                chunk = self._socket.recv(4096)
-                if not chunk:
-                    raise ConnectionError("Connection closed by server")
-                response_data += chunk
-                if b"\n" in response_data:
-                    break
+            has_error = "error" in response
+            has_result = "result" in response
+            if has_error == has_result:
+                raise RPCProtocolError(
+                    "JSON-RPC response must contain exactly one of result or error"
+                )
+            if has_error:
+                error = response["error"]
+                if not isinstance(error, dict):
+                    raise RPCProtocolError("JSON-RPC error must be an object")
+                code = error.get("code")
+                message = error.get("message")
+                if type(code) is not int or not isinstance(message, str):
+                    raise RPCProtocolError(
+                        "JSON-RPC error must contain integer code and string message"
+                    )
+                raise RPCError(code=code, message=message, data=error.get("data"))
 
-            response_str = response_data.decode("utf-8").strip()
-            response = json.loads(response_str)
-        except socket.timeout as exc:
-            raise ConnectionError("Request timed out") from exc
-        except OSError as exc:
-            raise ConnectionError(f"Failed to receive response: {exc}") from exc
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON response: {exc}") from exc
+            return response["result"]
 
-        # Check for errors in the response
-        if "error" in response:
-            error = response["error"]
-            raise RPCError(
-                code=error.get("code", -1),
-                message=error.get("message", "Unknown error"),
-                data=error.get("data"),
-            )
+    @staticmethod
+    def _address_params(address: AddressInput) -> JsonObject:
+        """Validate and normalize a single address or address list."""
+        if isinstance(address, str):
+            if not address.strip():
+                raise ValueError("address must be a non-empty string")
+            return {"address": address}
+        if not isinstance(address, list):
+            raise ValueError("address must be a string or list of strings")
+        if not address:
+            raise ValueError("address list must not be empty")
+        if any(not isinstance(item, str) or not item.strip() for item in address):
+            raise ValueError("all addresses must be non-empty strings")
+        return {"addresses": address.copy()}
 
-        # Return the result
-        return response.get("result")
+    @staticmethod
+    def _expect_object(result: Any, method: str) -> JsonObject:
+        """Require an object result from a method that promises one."""
+        if not isinstance(result, dict):
+            raise RPCProtocolError(f"{method} result must be an object")
+        return result
+
+    @staticmethod
+    def _expect_string_list(result: Any, method: str) -> list[str]:
+        """Require a list containing only strings."""
+        if not isinstance(result, list) or any(not isinstance(item, str) for item in result):
+            raise RPCProtocolError(f"{method} result must be a list of strings")
+        return result
+
+    @staticmethod
+    def _expect_integer(result: Any, method: str) -> int:
+        """Require an integer, accepting integral JSON numbers."""
+        if isinstance(result, bool) or not isinstance(result, (int, float)):
+            raise RPCProtocolError(f"{method} result must be an integer")
+        if isinstance(result, float) and not result.is_integer():
+            raise RPCProtocolError(f"{method} result must be an integer")
+        return int(result)
 
     def ping(self) -> str:
         """
@@ -168,7 +284,10 @@ class RPCClient:
         Returns:
             The pong response from the server
         """
-        return self._send_request("ping")
+        result = self._send_request("ping")
+        if not isinstance(result, str):
+            raise RPCProtocolError("ping result must be a string")
+        return result
 
     def health(self) -> dict[str, Any]:
         """
@@ -177,7 +296,7 @@ class RPCClient:
         Returns:
             A dictionary containing health status information
         """
-        return self._send_request("health")
+        return self._expect_object(self._send_request("health"), "health")
 
     def methods(self) -> list[str]:
         """
@@ -186,7 +305,10 @@ class RPCClient:
         Returns:
             A list of method names
         """
-        return self._send_request("methods")
+        result = self._send_request("methods")
+        if isinstance(result, dict):
+            result = result.get("methods")
+        return self._expect_string_list(result, "methods")
 
     def authenticate(self, token: str) -> dict[str, Any]:
         """
@@ -200,9 +322,9 @@ class RPCClient:
         """
         if not token:
             raise ValueError("token must be a non-empty string")
-        return self._send_request("auth", {"token": token})
+        return self._expect_object(self._send_request("auth", {"token": token}), "auth")
 
-    def monitor_add(self, address: Union[str, list[str]]) -> dict[str, Any]:
+    def monitor_add(self, address: AddressInput) -> dict[str, Any]:
         """
         Add one or more addresses to the monitoring set.
 
@@ -212,16 +334,12 @@ class RPCClient:
         Returns:
             Result information from the server
         """
-        if isinstance(address, str):
-            params = {"address": address}
-        elif isinstance(address, list):
-            params = {"addresses": address}
-        else:
-            raise ValueError("address must be a string or list of strings")
+        return self._expect_object(
+            self._send_request("monitor_add", self._address_params(address)),
+            "monitor_add",
+        )
 
-        return self._send_request("monitor_add", params)
-
-    def add_address(self, address: Union[str, list[str]]) -> dict[str, Any]:
+    def add_address(self, address: AddressInput) -> dict[str, Any]:
         """Alias for monitor_add."""
         return self.monitor_add(address)
 
@@ -229,7 +347,7 @@ class RPCClient:
         """Alias for monitor_add with a list of addresses."""
         return self.monitor_add(addresses)
 
-    def monitor_remove(self, address: Union[str, list[str]]) -> dict[str, Any]:
+    def monitor_remove(self, address: AddressInput) -> dict[str, Any]:
         """
         Remove one or more addresses from the monitoring set.
 
@@ -239,16 +357,12 @@ class RPCClient:
         Returns:
             Result information from the server
         """
-        if isinstance(address, str):
-            params = {"address": address}
-        elif isinstance(address, list):
-            params = {"addresses": address}
-        else:
-            raise ValueError("address must be a string or list of strings")
+        return self._expect_object(
+            self._send_request("monitor_remove", self._address_params(address)),
+            "monitor_remove",
+        )
 
-        return self._send_request("monitor_remove", params)
-
-    def remove_address(self, address: Union[str, list[str]]) -> dict[str, Any]:
+    def remove_address(self, address: AddressInput) -> dict[str, Any]:
         """Alias for monitor_remove."""
         return self.monitor_remove(address)
 
@@ -256,7 +370,7 @@ class RPCClient:
         """Alias for monitor_remove with a list of addresses."""
         return self.monitor_remove(addresses)
 
-    def monitor_has(self, address: Union[str, list[str]]) -> Union[bool, dict[str, bool]]:
+    def monitor_has(self, address: AddressInput) -> Union[bool, dict[str, bool]]:
         """
         Check if one or more addresses are in the monitoring set.
 
@@ -267,29 +381,31 @@ class RPCClient:
             For a single address: boolean indicating if monitored
             For multiple addresses: dict mapping addresses to boolean values
         """
+        result = self._expect_object(
+            self._send_request("monitor_has", self._address_params(address)),
+            "monitor_has",
+        )
+        present = self._expect_string_list(result.get("present"), "monitor_has.present")
         if isinstance(address, str):
-            params = {"address": address}
-        elif isinstance(address, list):
-            params = {"addresses": address}
-        else:
-            raise ValueError("address must be a string or list of strings")
+            return address in present
+        present_set = set(present)
+        return {item: item in present_set for item in address}
 
-        return self._send_request("monitor_has", params)
-
-    def is_monitored(self, address: Union[str, list[str]]) -> Union[bool, dict[str, bool]]:
+    def is_monitored(self, address: AddressInput) -> Union[bool, dict[str, bool]]:
         """Alias for monitor_has."""
         return self.monitor_has(address)
 
-    def monitor_count(self) -> Union[int, dict[str, Any]]:
+    def monitor_count(self) -> int:
         """
         Get the number of monitored addresses.
 
         Returns:
-            The monitor_count RPC result.
-            Current server behavior returns an object with keys like
-            {"set_key": "...", "count": N}.
+            The number of monitored addresses.
         """
-        return self._send_request("monitor_count")
+        result = self._send_request("monitor_count")
+        if isinstance(result, dict):
+            result = result.get("count")
+        return self._expect_integer(result, "monitor_count")
 
     def monitor_list(self) -> list[str]:
         """
@@ -298,7 +414,10 @@ class RPCClient:
         Returns:
             A list of address strings
         """
-        return self._send_request("monitor_list")
+        result = self._send_request("monitor_list")
+        if isinstance(result, dict):
+            result = result.get("addresses")
+        return self._expect_string_list(result, "monitor_list")
 
     def monitor_clear(self, confirm: bool = False) -> dict[str, Any]:
         """
@@ -316,14 +435,17 @@ class RPCClient:
         if not confirm:
             raise ValueError("Must set confirm=True to clear monitored addresses")
 
-        return self._send_request("monitor_clear", {"confirm": True})
+        return self._expect_object(
+            self._send_request("monitor_clear", {"confirm": True}),
+            "monitor_clear",
+        )
 
-    def load_addresses_from_file(self, filepath: str) -> dict[str, Any]:
+    def load_addresses_from_file(self, filepath: Union[str, Path]) -> dict[str, Any]:
         """
         Load addresses from a file and add them to the monitoring set.
 
         Reads addresses from the specified file (one address per line),
-        strips whitespace, skips empty lines and comments (lines starting with #),
+        strips whitespace, skips empty lines, removes comments beginning with #,
         and sends them to the server using monitor_add.
 
         Args:
@@ -338,14 +460,12 @@ class RPCClient:
             ValueError: If no valid addresses found in the file
         """
         try:
-            with open(filepath) as f:
-                addresses = []
-                for line in f:
-                    # Strip whitespace
-                    line = line.strip()
-                    # Skip empty lines and comments
-                    if line and not line.startswith("#"):
-                        addresses.append(line)
+            with Path(filepath).open(encoding="utf-8") as address_file:
+                addresses = [
+                    line
+                    for raw_line in address_file
+                    if (line := raw_line.partition("#")[0].strip())
+                ]
         except FileNotFoundError as exc:
             raise FileNotFoundError(f"Address file not found: {filepath}") from exc
         except OSError as exc:
@@ -354,34 +474,38 @@ class RPCClient:
         if not addresses:
             raise ValueError(f"No valid addresses found in file: {filepath}")
 
-        # Use the existing monitor_add method to send addresses to server
         return self.monitor_add(addresses)
 
     def close(self) -> None:
         """Close the connection to the RPC server."""
-        # hasattr check needed for objects created with __new__ that skip __init__
-        if hasattr(self, "_socket") and self._socket:
-            try:
-                self._socket.close()
-            except OSError:
-                pass
-            finally:
-                self._socket = None
+        active_socket = getattr(self, "_socket", None)
+        if active_socket is not None:
+            self._socket = None
+            with suppress(OSError):
+                active_socket.close()
+        receive_buffer = getattr(self, "_receive_buffer", None)
+        if receive_buffer is not None:
+            receive_buffer.clear()
 
-    def __enter__(self):
+    def __enter__(self) -> "RPCClient":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit."""
         self.close()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup when object is destroyed."""
         self.close()
 
 
-def main():
+def main() -> None:
     """
     Example usage of the RPC client.
 

@@ -58,3 +58,6 @@ jobs:
 
       - name: Type check
         run: uv run --frozen pyright
+
+      - name: Test
+        run: uv run --frozen python -m unittest discover -s tests

@@ -157,7 +157,7 @@ with RPCClient(auth_token="your-token") as client:
 ### Connection Errors
 
 ```python
-from python.rpc_client import RPCClient, RPCError
+from python.rpc_client import RPCClient
 
 try:
     client = RPCClient(host="127.0.0.1", port=8080, auth_token="your-token")
@@ -169,7 +169,7 @@ except ConnectionError as e:
 ### RPC Errors
 
 ```python
-from python.rpc_client import RPCClient, RPCError
+from python.rpc_client import RPCClient, RPCError, RPCProtocolError
 
 try:
     with RPCClient(auth_token="your-token") as client:
@@ -179,6 +179,8 @@ except RPCError as e:
     print(f"RPC Error {e.code}: {e.message}")
     if e.data:
         print(f"Additional info: {e.data}")
+except RPCProtocolError as e:
+    print(f"Invalid server response: {e}")
 ```
 
 ### Validation Errors
@@ -197,12 +199,21 @@ except ValueError as e:
 
 ## Advanced Usage
 
-### Custom Timeout
+### Connection Limits
 
 ```python
-# Set a custom timeout (in seconds)
-client = RPCClient(host="127.0.0.1", port=8080, timeout=60.0, auth_token="your-token")
+# Set a custom timeout and response-size limit.
+client = RPCClient(
+    host="127.0.0.1",
+    port=8080,
+    timeout=60.0,
+    auth_token="your-token",
+    max_response_bytes=8 * 1024 * 1024,
+)
 ```
+
+Responses are newline-delimited and limited to 4 MiB by default. The client validates the
+JSON-RPC version, response ID, and success/error envelope before returning a result.
 
 ### Multiple Clients
 
@@ -337,7 +348,7 @@ The server may validate Ethereum address format. Ensure addresses:
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.9.1+
 - No external dependencies (standard library only)
 - Running `rpc_control` server
 - Redis/Valkey instance (for the server)
