@@ -51,6 +51,7 @@ Common commands:
 just build
 just build-sanitize
 just format
+just check-c-format
 just python-check
 ```
 

@@ -1,0 +1,15 @@
+# Bundled third-party sources are kept in their upstream format.
+include/hiredis/**
+include/jsonrpc/**
+include/parg/**
+include/parson/**
+include/rabbitmq/**
+include/toml/**
+include/ulog/**
+src/hiredis/**
+src/jsonrpc/**
+src/rabbitmq/**
+src/parg.c
+src/parson.c
+src/toml.c
+src/ulog.c

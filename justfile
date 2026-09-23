@@ -20,6 +20,9 @@ format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i
     ruff format .
 
+check-c-format:
+    find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format --dry-run --Werror
+
 python-tools:
     python3 -m pip install --requirement requirements-dev.txt
 

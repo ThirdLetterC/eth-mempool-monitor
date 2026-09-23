@@ -6,8 +6,8 @@ Usage:
     python3 python/load_addresses_example.py <addresses_file> [host] [port] [auth_token]
 
 Example:
-    python3 python/load_addresses_example.py addresses.txt
-    python3 python/load_addresses_example.py addresses.txt 127.0.0.1 8080 my-secret-token
+    python3 python/load_addresses_example.py conf/addresses.txt
+    python3 python/load_addresses_example.py conf/addresses.txt 127.0.0.1 8080 my-secret-token
 """
 
 import os

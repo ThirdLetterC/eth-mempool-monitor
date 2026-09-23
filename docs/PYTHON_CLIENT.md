@@ -60,7 +60,7 @@ with RPCClient(auth_token='your-token') as client:
     ])
     
     # Load addresses from a file
-    client.load_addresses_from_file('addresses.txt')
+    client.load_addresses_from_file('conf/addresses.txt')
     
     # Alternative method names (aliases)
     client.add_address('0x4444444444444444444444444444444444444444')

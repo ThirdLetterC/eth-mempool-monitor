@@ -15,7 +15,7 @@ Usage:
     result = client.monitor_add('0x1111111111111111111111111111111111111111')
 
     # Load addresses from a file
-    result = client.load_addresses_from_file('addresses.txt')
+    result = client.load_addresses_from_file('conf/addresses.txt')
 
     # List all monitored addresses
     addresses = client.monitor_list()
