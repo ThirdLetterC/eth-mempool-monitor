@@ -18,18 +18,19 @@ build-valgrind:
 
 format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i
-    ruff format .
+    uv run ruff format .
 
 check-c-format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format --dry-run --Werror
 
 python-tools:
-    python3 -m pip install --requirement requirements-dev.txt
+    uv venv --python 3.13
+    uv sync --only-dev
 
 python-check:
-    ruff format --check .
-    ruff check .
-    pyright
+    uv run --frozen ruff format --check .
+    uv run --frozen ruff check .
+    uv run --frozen pyright
 
 valgrind-rpc-control *args:
     zig build -Dvalgrind=true valgrind-rpc-control -- {{args}}

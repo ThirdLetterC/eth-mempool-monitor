@@ -1,12 +1,42 @@
+[project]
+name = "eth-mempool-monitor"
+version = "0.1.0"
+description = "Ethereum mempool monitor and Python RPC client utilities"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "GPL-3.0-only"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pyright==1.1.414",
+    "ruff==0.16.8",
+]
+
+[tool.uv]
+package = false
+
 [tool.ruff]
 extend-exclude = ["*.md"]
 line-length = 100
+src = ["python"]
 target-version = "py39"
 
+[tool.ruff.format]
+docstring-code-format = true
+indent-style = "space"
+line-ending = "lf"
+quote-style = "double"
+
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["B", "C4", "E4", "E7", "E9", "F", "I", "RUF", "SIM", "UP"]
 
 [tool.pyright]
+exclude = ["**/__pycache__"]
 include = ["python"]
 pythonVersion = "3.9"
+reportUnnecessaryCast = "warning"
+reportUnnecessaryComparison = "warning"
+reportUnnecessaryContains = "warning"
+reportUnnecessaryTypeIgnoreComment = "warning"
 typeCheckingMode = "standard"

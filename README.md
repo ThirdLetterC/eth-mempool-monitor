@@ -45,6 +45,15 @@ Use the [RPC API](docs/RPC_API.md) or the
 
 ## Development
 
+Create the Python development environment with
+[uv](https://docs.astral.sh/uv/):
+
+```bash
+uv venv --python 3.13
+uv sync --only-dev
+source .venv/bin/activate
+```
+
 Common commands:
 
 ```bash

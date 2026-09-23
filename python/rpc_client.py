@@ -32,7 +32,7 @@ Usage:
 
 import json
 import socket
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 
 class RPCError(Exception):
@@ -89,15 +89,15 @@ class RPCClient:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._socket.settimeout(self.timeout)
             self._socket.connect((self.host, self.port))
-        except socket.error as e:
-            raise ConnectionError(f"Failed to connect to {self.host}:{self.port}: {e}")
+        except OSError as exc:
+            raise ConnectionError(f"Failed to connect to {self.host}:{self.port}: {exc}") from exc
 
     def _get_next_id(self) -> int:
         """Get the next request ID."""
         self._request_id += 1
         return self._request_id
 
-    def _send_request(self, method: str, params: Optional[Union[Dict, List, str]] = None) -> Any:
+    def _send_request(self, method: str, params: Optional[Union[dict, list, str]] = None) -> Any:
         """
         Send a JSON-RPC request and return the result.
 
@@ -116,7 +116,7 @@ class RPCClient:
             raise ConnectionError("Not connected to RPC server")
 
         # Build the JSON-RPC 2.0 request
-        request: Dict[str, Any] = {"jsonrpc": "2.0", "id": self._get_next_id(), "method": method}
+        request: dict[str, Any] = {"jsonrpc": "2.0", "id": self._get_next_id(), "method": method}
 
         if params is not None:
             request["params"] = params
@@ -126,8 +126,8 @@ class RPCClient:
 
         try:
             self._socket.sendall(request_str.encode("utf-8"))
-        except socket.error as e:
-            raise ConnectionError(f"Failed to send request: {e}")
+        except OSError as exc:
+            raise ConnectionError(f"Failed to send request: {exc}") from exc
 
         # Receive and parse the response
         try:
@@ -142,12 +142,12 @@ class RPCClient:
 
             response_str = response_data.decode("utf-8").strip()
             response = json.loads(response_str)
-        except socket.timeout:
-            raise ConnectionError("Request timed out")
-        except socket.error as e:
-            raise ConnectionError(f"Failed to receive response: {e}")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON response: {e}")
+        except socket.timeout as exc:
+            raise ConnectionError("Request timed out") from exc
+        except OSError as exc:
+            raise ConnectionError(f"Failed to receive response: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON response: {exc}") from exc
 
         # Check for errors in the response
         if "error" in response:
@@ -170,7 +170,7 @@ class RPCClient:
         """
         return self._send_request("ping")
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """
         Check the health status of the server.
 
@@ -179,7 +179,7 @@ class RPCClient:
         """
         return self._send_request("health")
 
-    def methods(self) -> List[str]:
+    def methods(self) -> list[str]:
         """
         Get the list of available RPC methods.
 
@@ -188,7 +188,7 @@ class RPCClient:
         """
         return self._send_request("methods")
 
-    def authenticate(self, token: str) -> Dict[str, Any]:
+    def authenticate(self, token: str) -> dict[str, Any]:
         """
         Authenticate this connection against the rpc_control auth layer.
 
@@ -202,7 +202,7 @@ class RPCClient:
             raise ValueError("token must be a non-empty string")
         return self._send_request("auth", {"token": token})
 
-    def monitor_add(self, address: Union[str, List[str]]) -> Dict[str, Any]:
+    def monitor_add(self, address: Union[str, list[str]]) -> dict[str, Any]:
         """
         Add one or more addresses to the monitoring set.
 
@@ -221,15 +221,15 @@ class RPCClient:
 
         return self._send_request("monitor_add", params)
 
-    def add_address(self, address: Union[str, List[str]]) -> Dict[str, Any]:
+    def add_address(self, address: Union[str, list[str]]) -> dict[str, Any]:
         """Alias for monitor_add."""
         return self.monitor_add(address)
 
-    def add_addresses(self, addresses: List[str]) -> Dict[str, Any]:
+    def add_addresses(self, addresses: list[str]) -> dict[str, Any]:
         """Alias for monitor_add with a list of addresses."""
         return self.monitor_add(addresses)
 
-    def monitor_remove(self, address: Union[str, List[str]]) -> Dict[str, Any]:
+    def monitor_remove(self, address: Union[str, list[str]]) -> dict[str, Any]:
         """
         Remove one or more addresses from the monitoring set.
 
@@ -248,15 +248,15 @@ class RPCClient:
 
         return self._send_request("monitor_remove", params)
 
-    def remove_address(self, address: Union[str, List[str]]) -> Dict[str, Any]:
+    def remove_address(self, address: Union[str, list[str]]) -> dict[str, Any]:
         """Alias for monitor_remove."""
         return self.monitor_remove(address)
 
-    def remove_addresses(self, addresses: List[str]) -> Dict[str, Any]:
+    def remove_addresses(self, addresses: list[str]) -> dict[str, Any]:
         """Alias for monitor_remove with a list of addresses."""
         return self.monitor_remove(addresses)
 
-    def monitor_has(self, address: Union[str, List[str]]) -> Union[bool, Dict[str, bool]]:
+    def monitor_has(self, address: Union[str, list[str]]) -> Union[bool, dict[str, bool]]:
         """
         Check if one or more addresses are in the monitoring set.
 
@@ -276,11 +276,11 @@ class RPCClient:
 
         return self._send_request("monitor_has", params)
 
-    def is_monitored(self, address: Union[str, List[str]]) -> Union[bool, Dict[str, bool]]:
+    def is_monitored(self, address: Union[str, list[str]]) -> Union[bool, dict[str, bool]]:
         """Alias for monitor_has."""
         return self.monitor_has(address)
 
-    def monitor_count(self) -> Union[int, Dict[str, Any]]:
+    def monitor_count(self) -> Union[int, dict[str, Any]]:
         """
         Get the number of monitored addresses.
 
@@ -291,7 +291,7 @@ class RPCClient:
         """
         return self._send_request("monitor_count")
 
-    def monitor_list(self) -> List[str]:
+    def monitor_list(self) -> list[str]:
         """
         Get the list of all monitored addresses.
 
@@ -300,7 +300,7 @@ class RPCClient:
         """
         return self._send_request("monitor_list")
 
-    def monitor_clear(self, confirm: bool = False) -> Dict[str, Any]:
+    def monitor_clear(self, confirm: bool = False) -> dict[str, Any]:
         """
         Clear all monitored addresses.
 
@@ -318,7 +318,7 @@ class RPCClient:
 
         return self._send_request("monitor_clear", {"confirm": True})
 
-    def load_addresses_from_file(self, filepath: str) -> Dict[str, Any]:
+    def load_addresses_from_file(self, filepath: str) -> dict[str, Any]:
         """
         Load addresses from a file and add them to the monitoring set.
 
@@ -338,7 +338,7 @@ class RPCClient:
             ValueError: If no valid addresses found in the file
         """
         try:
-            with open(filepath, "r") as f:
+            with open(filepath) as f:
                 addresses = []
                 for line in f:
                     # Strip whitespace
@@ -346,10 +346,10 @@ class RPCClient:
                     # Skip empty lines and comments
                     if line and not line.startswith("#"):
                         addresses.append(line)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Address file not found: {filepath}")
-        except IOError as e:
-            raise IOError(f"Error reading address file {filepath}: {e}")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"Address file not found: {filepath}") from exc
+        except OSError as exc:
+            raise OSError(f"Error reading address file {filepath}: {exc}") from exc
 
         if not addresses:
             raise ValueError(f"No valid addresses found in file: {filepath}")
@@ -363,7 +363,7 @@ class RPCClient:
         if hasattr(self, "_socket") and self._socket:
             try:
                 self._socket.close()
-            except socket.error:
+            except OSError:
                 pass
             finally:
                 self._socket = None

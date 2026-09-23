@@ -3,6 +3,7 @@
 ## Requirements
 
 - Zig 0.16.0
+- uv for the Python development environment
 - wolfSSL development library (`libwolfssl`)
 - libuv development library (`libuv`)
 - Network access on the first `-Dmimalloc=true` build so Zig can fetch the
@@ -110,6 +111,14 @@ ms_print massif.out.<pid>
 
 ## Convenience Commands
 
+Initialize and activate the Python development environment:
+
+```bash
+uv venv --python 3.13
+uv sync --only-dev
+source .venv/bin/activate
+```
+
 The `justfile` provides shortcuts including:
 
 - `just build`
@@ -117,6 +126,7 @@ The `justfile` provides shortcuts including:
 - `just build-sanitize`
 - `just build-release`
 - `just format`
+- `just python-tools`
 - `just python-check`
 - `just run`
 - `just run-config`

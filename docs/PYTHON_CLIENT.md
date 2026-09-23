@@ -337,7 +337,7 @@ The server may validate Ethereum address format. Ensure addresses:
 
 ## Requirements
 
-- Python 3.6+ (uses type hints)
+- Python 3.9+
 - No external dependencies (standard library only)
 - Running `rpc_control` server
 - Redis/Valkey instance (for the server)
