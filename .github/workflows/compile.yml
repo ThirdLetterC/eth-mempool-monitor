@@ -1,0 +1,44 @@
+name: Compile
+
+on:
+  push:
+    paths:
+      - "src/**/*.c"
+      - "include/**/*.h"
+      - "build.zig"
+      - ".github/workflows/compile.yml"
+  pull_request:
+    paths:
+      - "src/**/*.c"
+      - "include/**/*.h"
+      - "build.zig"
+      - ".github/workflows/compile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libc6-dev \
+            libuv1-dev \
+            libwolfssl-dev \
+            pkg-config
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Compile
+        run: zig build
