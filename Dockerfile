@@ -3,7 +3,7 @@
 FROM debian:bookworm-slim AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ZIG_VERSION=0.15.2
+ARG ZIG_VERSION=0.16.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -15,7 +15,6 @@ RUN apt-get update \
         pkg-config \
         libwolfssl-dev \
         libuv1-dev \
-        libmimalloc-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
@@ -35,7 +34,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         libwolfssl35 \
-        libmimalloc2.0 \
         libuv1 \
     && rm -rf /var/lib/apt/lists/*
 

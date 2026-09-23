@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
     const use_sanitizers = enable_sanitizers and optimize == .Debug and target.result.os.tag != .windows;
     const sanitize_c = if (use_sanitizers) std.zig.SanitizeC.full else std.zig.SanitizeC.off;
     const enable_hardening = target.result.os.tag == .linux;
+    const mimalloc_dependency = if (use_mimalloc)
+        b.lazyDependency("mimalloc", .{}) orelse return
+    else
+        null;
 
     const c_flags = if (use_mimalloc)
         if (enable_hardening)
@@ -226,6 +230,39 @@ pub fn build(b: *std.Build) void {
         "src/rabbitmq/amqp_url.c",
     };
 
+    var mimalloc_library: ?*std.Build.Step.Compile = null;
+    if (mimalloc_dependency) |dependency| {
+        const mimalloc_c_flags = if (optimize == .Debug)
+            &[_][]const u8{
+                "-std=c23",
+                "-DMI_MALLOC_OVERRIDE=1",
+                "-DMI_STATIC_LIB=1",
+            }
+        else
+            &[_][]const u8{
+                "-std=c23",
+                "-DMI_BUILD_RELEASE=1",
+                "-DMI_MALLOC_OVERRIDE=1",
+                "-DMI_STATIC_LIB=1",
+            };
+        const mimalloc_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .sanitize_c = sanitize_c,
+        });
+        mimalloc_module.addIncludePath(dependency.path("include"));
+        mimalloc_module.addCSourceFile(.{
+            .file = dependency.path("src/static.c"),
+            .flags = mimalloc_c_flags,
+        });
+        mimalloc_library = b.addLibrary(.{
+            .name = "mimalloc",
+            .linkage = .static,
+            .root_module = mimalloc_module,
+        });
+    }
+
     const lib_module = b.createModule(.{
         .target = target,
         .optimize = optimize,
@@ -235,9 +272,6 @@ pub fn build(b: *std.Build) void {
     });
     lib_module.addIncludePath(b.path("include"));
     lib_module.addCSourceFile(.{ .file = b.path("src/ws_client.c"), .flags = c_flags });
-    if (use_mimalloc) {
-        lib_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });
-    }
 
     const lib = b.addLibrary(.{
         .name = "websocket_client",
@@ -263,8 +297,8 @@ pub fn build(b: *std.Build) void {
     monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_config.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_runtime.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/main.c"), .flags = c_flags });
-    if (use_mimalloc) {
-        monitor_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });
+    if (mimalloc_dependency) |dependency| {
+        monitor_module.addIncludePath(dependency.path("include"));
     }
     for (hiredis_files) |file| {
         monitor_module.addCSourceFile(.{ .file = b.path(file), .flags = hiredis_c_flags });
@@ -284,8 +318,8 @@ pub fn build(b: *std.Build) void {
     }
     monitor_module.linkLibrary(lib);
     monitor_module.linkSystemLibrary("wolfssl", .{});
-    if (use_mimalloc) {
-        monitor_module.linkSystemLibrary("mimalloc", .{});
+    if (mimalloc_library) |library| {
+        monitor_module.linkLibrary(library);
     }
 
     b.installArtifact(monitor);
@@ -310,8 +344,8 @@ pub fn build(b: *std.Build) void {
     rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
     rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
     rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console.c"), .flags = c_flags });
-    if (use_mimalloc) {
-        rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });
+    if (mimalloc_dependency) |dependency| {
+        rabbitmq_console_module.addIncludePath(dependency.path("include"));
     }
     for (rabbitmq_files) |file| {
         rabbitmq_console_module.addCSourceFile(.{ .file = b.path(file), .flags = rabbitmq_c_flags });
@@ -327,8 +361,8 @@ pub fn build(b: *std.Build) void {
         rabbitmq_console.link_z_lazy = false;
     }
     rabbitmq_console_module.linkSystemLibrary("wolfssl", .{});
-    if (use_mimalloc) {
-        rabbitmq_console_module.linkSystemLibrary("mimalloc", .{});
+    if (mimalloc_library) |library| {
+        rabbitmq_console_module.linkLibrary(library);
     }
     b.installArtifact(rabbitmq_console);
 
@@ -354,8 +388,8 @@ pub fn build(b: *std.Build) void {
     rpc_control_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
     rpc_control_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
     rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control.c"), .flags = jsonrpc_c_flags });
-    if (use_mimalloc) {
-        rpc_control_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });
+    if (mimalloc_dependency) |dependency| {
+        rpc_control_module.addIncludePath(dependency.path("include"));
     }
     for (jsonrpc_files) |file| {
         rpc_control_module.addCSourceFile(.{ .file = b.path(file), .flags = jsonrpc_c_flags });
@@ -374,8 +408,8 @@ pub fn build(b: *std.Build) void {
         rpc_control.link_z_lazy = false;
     }
     rpc_control_module.linkSystemLibrary("uv", .{});
-    if (use_mimalloc) {
-        rpc_control_module.linkSystemLibrary("mimalloc", .{});
+    if (mimalloc_library) |library| {
+        rpc_control_module.linkLibrary(library);
     }
     b.installArtifact(rpc_control);
 

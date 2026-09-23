@@ -1,0 +1,19 @@
+.{
+    .name = .eth_mempool_monitor,
+    .version = "0.1.0",
+    .fingerprint = 0xecbb2f34785af150, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .mimalloc = .{
+            .url = "git+https://github.com/microsoft/mimalloc.git#d4881d338125e1cb7c47ba4cfb398d6f7c0c8d45",
+            .hash = "N-V-__8AAJ2kWgAyMSn9Yf-t-pUPi1ZkFkG6UUOmXod6BvPG",
+            .lazy = true,
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "include",
+        "src",
+    },
+}

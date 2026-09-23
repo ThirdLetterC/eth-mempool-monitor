@@ -5,7 +5,8 @@
 - Zig 0.16.0
 - wolfSSL development library (`libwolfssl`)
 - libuv development library (`libuv`)
-- mimalloc development library (`libmimalloc`) when using `-Dmimalloc=true`
+- Network access on the first `-Dmimalloc=true` build so Zig can fetch the
+  pinned mimalloc source dependency
 - Redis or Valkey at runtime
 - RabbitMQ at runtime
 
@@ -29,7 +30,8 @@ Useful options:
 
 - `-Dsanitizers=true`: enable ASan, UBSan, and LSan in debug builds.
 - `-Dvalgrind=true`: use baseline CPU features for Valgrind compatibility.
-- `-Dmimalloc=true`: route allocation through mimalloc.
+- `-Dmimalloc=true`: fetch, statically link, and route allocation through
+  mimalloc.
 - `-Dstrip=true`: strip debug symbols.
 - `-Drelease=true`: build in release mode.
 
