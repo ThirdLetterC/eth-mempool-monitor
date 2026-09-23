@@ -1,8 +1,11 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-FROM debian:bookworm-slim AS builder
+ARG DEBIAN_IMAGE=debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+
+FROM ${DEBIAN_IMAGE} AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG TARGETARCH
 ARG ZIG_VERSION=0.16.0
 
 RUN apt-get update \
@@ -17,16 +20,34 @@ RUN apt-get update \
         libuv1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
-    | tar -xJ -C /opt \
-    && ln -s "/opt/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
+RUN case "${TARGETARCH}" in \
+        amd64) \
+            zig_arch=x86_64; \
+            zig_sha256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 \
+            ;; \
+        arm64) \
+            zig_arch=aarch64; \
+            zig_sha256=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17 \
+            ;; \
+        *) \
+            echo "Unsupported architecture: ${TARGETARCH}" >&2; \
+            exit 1 \
+            ;; \
+    esac \
+    && zig_archive="zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz" \
+    && curl --proto '=https' --tlsv1.2 -fsSLo "/tmp/${zig_archive}" \
+        "https://ziglang.org/download/${ZIG_VERSION}/${zig_archive}" \
+    && echo "${zig_sha256}  /tmp/${zig_archive}" | sha256sum --check --strict - \
+    && tar -xJf "/tmp/${zig_archive}" -C /opt \
+    && ln -s "/opt/zig-${zig_arch}-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig \
+    && rm "/tmp/${zig_archive}"
 
 WORKDIR /src
 COPY . .
 
 RUN zig build -Drelease=true -Dstrip=true -Dmimalloc=true
 
-FROM debian:bookworm-slim AS runtime
+FROM ${DEBIAN_IMAGE} AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -37,15 +58,9 @@ RUN apt-get update \
         libuv1 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
 COPY --from=builder /src/zig-out/bin/eth_mempool_monitor /usr/local/bin/eth_mempool_monitor
 COPY --from=builder /src/zig-out/bin/rpc_control /usr/local/bin/rpc_control
 COPY --from=builder /src/zig-out/bin/rabbitmq_tx_console /usr/local/bin/rabbitmq_tx_console
-
-ENV CONFIG_PATH=/config/config.toml
-
-VOLUME ["/config"]
 
 USER nobody:nogroup
 
