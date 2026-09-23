@@ -40,5 +40,5 @@ run-secure *args:
 run-insecure *args:
     zig build run-example -- --insecure {{args}}
 
-run-config config="config.toml" *args:
+run-config config="conf/config.toml" *args:
     zig build run-example -- --config {{config}} {{args}}

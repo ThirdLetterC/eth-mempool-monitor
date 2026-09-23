@@ -27,7 +27,7 @@
 constexpr int32_t RPC_CONTROL_DEFAULT_PORT = 8080;
 constexpr char RPC_CONTROL_DEFAULT_HOST[] = "127.0.0.1";
 constexpr int32_t RPC_CONTROL_DEFAULT_BACKLOG = 4096;
-constexpr char RPC_CONTROL_DEFAULT_CONFIG_PATH[] = "config.toml";
+constexpr char RPC_CONTROL_DEFAULT_CONFIG_PATH[] = "conf/config.toml";
 constexpr char RPC_CONTROL_DEFAULT_AUTH_TOKEN[] = "CHANGE_ME";
 constexpr ulog_level RPC_CONTROL_DEFAULT_LOG_LEVEL = ULOG_LEVEL_INFO;
 constexpr bool RPC_CONTROL_DEFAULT_LOG_COLOR = true;
@@ -643,7 +643,7 @@ rpc_control_validate_security_config(const rpc_control_config_t *config) {
 
   if (rpc_control_is_blank_string(config->auth_token)) {
     ulog_error(
-        "rpc_control.auth_token is required. Configure it in config.toml "
+        "rpc_control.auth_token is required. Configure it in conf/config.toml "
         "or pass --auth-token.\n");
     return false;
   }

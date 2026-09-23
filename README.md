@@ -102,8 +102,8 @@ zig build
 3. Start control server (terminal 1):
 
 ```bash
-# Set rpc_control.auth_token in config.toml to a unique secret first.
-zig build run-rpc-control -- --config config.toml
+# Set rpc_control.auth_token in conf/config.toml to a unique secret first.
+zig build run-rpc-control -- --config conf/config.toml
 ```
 
 Valgrind Massif profiling example:
@@ -127,7 +127,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"monitor_list"}' | nc 127.0.0.1 
 5. Start mempool monitor (terminal 3):
 
 ```bash
-zig build run-example -- --config config.toml
+zig build run-example -- --config conf/config.toml
 ```
 
 ## Production Docker Stack
@@ -141,7 +141,7 @@ zig build run-example -- --config config.toml
 
 Before starting:
 
-- Set a strong `rpc_control.auth_token` in `config.toml`.
+- Set a strong `rpc_control.auth_token` in `conf/config.toml`.
 - Ensure host overcommit is enabled for Valkey:
 
 ```bash
@@ -278,7 +278,7 @@ with RPCClient(host='127.0.0.1', port=8080, auth_token='your-secure-token') as c
 
 ```bash
 # Terminal 1: Start the RPC control server
-zig build run-rpc-control -- --config config.toml
+zig build run-rpc-control -- --config conf/config.toml
 
 # Terminal 2: Run the example script
 python3 example_rpc_client.py

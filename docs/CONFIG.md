@@ -1,6 +1,6 @@
 # Configuration
 
-Default config file path is `config.toml`. CLI flags override TOML values.
+Default config file path is `conf/config.toml`. CLI flags override TOML values.
 
 ## Pending Transaction Fallback
 

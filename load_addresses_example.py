@@ -105,7 +105,7 @@ def load_and_monitor_addresses(filepath, host="127.0.0.1", port=8080, auth_token
     except ConnectionError as e:
         print(f"Error: Cannot connect to RPC server: {e}", file=sys.stderr)
         print("\nMake sure the rpc_control server is running:", file=sys.stderr)
-        print("  zig build run-rpc-control -- --config config.toml", file=sys.stderr)
+        print("  zig build run-rpc-control -- --config conf/config.toml", file=sys.stderr)
         return False
     except RPCError as e:
         print(f"Error: RPC operation failed: {e}", file=sys.stderr)

@@ -510,7 +510,7 @@ def main():
         print(f"Connection error: {e}", file=sys.stderr)
         print(f"\nMake sure the rpc_control server is running on {host}:{port}", file=sys.stderr)
         print(
-            "You can start it with: zig build run-rpc-control -- --config config.toml",
+            "You can start it with: zig build run-rpc-control -- --config conf/config.toml",
             file=sys.stderr,
         )
         sys.exit(1)

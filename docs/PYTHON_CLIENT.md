@@ -14,8 +14,8 @@ docker compose -f compose.yml up -d
 zig build
 
 # Start the RPC control server
-# Set rpc_control.auth_token in config.toml first.
-zig build run-rpc-control -- --config config.toml
+# Set rpc_control.auth_token in conf/config.toml first.
+zig build run-rpc-control -- --config conf/config.toml
 ```
 
 ### 2. Use the Client
@@ -289,7 +289,7 @@ if __name__ == '__main__':
 If you get `Connection refused` or `Failed to connect`, make sure:
 
 1. Redis/Valkey is running: `docker compose ps`
-2. The RPC control server is running: `zig build run-rpc-control -- --config config.toml`
+2. The RPC control server is running: `zig build run-rpc-control -- --config conf/config.toml`
 3. The server is listening on the correct port (default: 8080)
 
 ### Timeout Errors

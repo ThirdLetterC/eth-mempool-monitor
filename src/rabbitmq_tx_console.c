@@ -79,7 +79,7 @@ struct app_rabbitmq_consumer {
   bool channel_open;
 };
 
-static constexpr char APP_DEFAULT_CONFIG_PATH[] = "config.toml";
+static constexpr char APP_DEFAULT_CONFIG_PATH[] = "conf/config.toml";
 static constexpr char APP_DEFAULT_RABBITMQ_HOST[] = "127.0.0.1";
 static constexpr uint16_t APP_DEFAULT_RABBITMQ_PORT = 5672;
 static constexpr char APP_DEFAULT_RABBITMQ_USERNAME[] = "guest";

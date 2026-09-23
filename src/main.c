@@ -87,7 +87,7 @@ struct app_cli_overrides {
   bool show_help;
 };
 
-static constexpr char APP_DEFAULT_CONFIG_PATH[] = "config.toml";
+static constexpr char APP_DEFAULT_CONFIG_PATH[] = "conf/config.toml";
 static constexpr char APP_DEFAULT_HOST[] =
     "ethereum-sepolia-rpc.publicnode.com";
 static constexpr uint16_t APP_DEFAULT_PORT = 443;
