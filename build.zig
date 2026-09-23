@@ -260,6 +260,8 @@ pub fn build(b: *std.Build) void {
     monitor_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_config.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_runtime.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/main.c"), .flags = c_flags });
     if (use_mimalloc) {
         monitor_module.addCSourceFile(.{ .file = b.path("src/mimalloc_override.c"), .flags = c_flags });

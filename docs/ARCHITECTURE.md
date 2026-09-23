@@ -9,6 +9,15 @@
 4. The monitor checks each transaction's `from` and `to` addresses in Redis.
 5. Matching transactions are published to RabbitMQ as JSON.
 
+## Application Modules
+
+- `main.c` wires allocator selection, configuration, runtime execution, and
+  centralized cleanup.
+- `monitor_config.c` owns defaults, TOML loading, CLI parsing, validation,
+  logging configuration, and sensitive string cleanup.
+- `monitor_runtime.c` owns signal handling, integration configuration, and the
+  bounded reconnect loop.
+
 ## RabbitMQ Event Payload
 
 When a monitored address matches `from` or `to`, the monitor publishes JSON like:
