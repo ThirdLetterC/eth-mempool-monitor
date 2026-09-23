@@ -1,4 +1,4 @@
-#include "rabbitmq_publisher_internal.h"
+#include "websocket-client/rabbitmq_publisher_internal.h"
 
 #include "ulog/ulog.h"
 

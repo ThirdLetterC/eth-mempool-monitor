@@ -1,4 +1,4 @@
-#include "rabbitmq_tx_console_internal.h"
+#include "websocket-client/rabbitmq_tx_console_internal.h"
 #include "parson/parson.h"
 #include "ulog/ulog.h"
 #include <inttypes.h>
