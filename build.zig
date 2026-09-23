@@ -280,12 +280,11 @@ pub fn build(b: *std.Build) void {
         monitor.link_z_relro = true;
         monitor.link_z_lazy = false;
     }
-    monitor.linkLibrary(lib);
-    monitor.linkSystemLibrary("wolfssl");
+    monitor_module.linkLibrary(lib);
+    monitor_module.linkSystemLibrary("wolfssl", .{});
     if (use_mimalloc) {
-        monitor.linkSystemLibrary("mimalloc");
+        monitor_module.linkSystemLibrary("mimalloc", .{});
     }
-    monitor.linkLibC();
 
     b.installArtifact(monitor);
 
@@ -325,11 +324,10 @@ pub fn build(b: *std.Build) void {
         rabbitmq_console.link_z_relro = true;
         rabbitmq_console.link_z_lazy = false;
     }
-    rabbitmq_console.linkSystemLibrary("wolfssl");
+    rabbitmq_console_module.linkSystemLibrary("wolfssl", .{});
     if (use_mimalloc) {
-        rabbitmq_console.linkSystemLibrary("mimalloc");
+        rabbitmq_console_module.linkSystemLibrary("mimalloc", .{});
     }
-    rabbitmq_console.linkLibC();
     b.installArtifact(rabbitmq_console);
 
     const run_rabbitmq_console = b.addRunArtifact(rabbitmq_console);
@@ -373,11 +371,10 @@ pub fn build(b: *std.Build) void {
         rpc_control.link_z_relro = true;
         rpc_control.link_z_lazy = false;
     }
-    rpc_control.linkSystemLibrary("uv");
+    rpc_control_module.linkSystemLibrary("uv", .{});
     if (use_mimalloc) {
-        rpc_control.linkSystemLibrary("mimalloc");
+        rpc_control_module.linkSystemLibrary("mimalloc", .{});
     }
-    rpc_control.linkLibC();
     b.installArtifact(rpc_control);
 
     const run_rpc_control = b.addRunArtifact(rpc_control);
