@@ -19,6 +19,7 @@ build-valgrind:
 format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i
     uv run ruff format .
+    uv run mdformat docs/PYTHON_CLIENT.md
 
 check-c-format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format --dry-run --Werror
@@ -30,6 +31,7 @@ python-tools:
 python-check:
     uv run --frozen ruff format --check .
     uv run --frozen ruff check .
+    uv run --frozen mdformat --check docs/PYTHON_CLIENT.md
     uv run --frozen pyright
 
 valgrind-rpc-control *args:

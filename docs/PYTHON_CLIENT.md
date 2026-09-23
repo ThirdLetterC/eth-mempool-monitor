@@ -36,12 +36,12 @@ python3 python/rpc_client.py 127.0.0.1 8080 your-token
 from python.rpc_client import RPCClient
 
 # Simple connection
-client = RPCClient(host='127.0.0.1', port=8080, auth_token='your-token')
+client = RPCClient(host="127.0.0.1", port=8080, auth_token="your-token")
 # ... use client ...
 client.close()
 
 # Better: Use context manager for automatic cleanup
-with RPCClient(host='127.0.0.1', port=8080, auth_token='your-token') as client:
+with RPCClient(host="127.0.0.1", port=8080, auth_token="your-token") as client:
     # Client automatically closes when exiting the block
     result = client.ping()
 ```
@@ -49,22 +49,21 @@ with RPCClient(host='127.0.0.1', port=8080, auth_token='your-token') as client:
 ### Adding Addresses
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Add a single address
-    client.monitor_add('0x1111111111111111111111111111111111111111')
-    
+    client.monitor_add("0x1111111111111111111111111111111111111111")
+
     # Add multiple addresses at once
-    client.monitor_add([
-        '0x2222222222222222222222222222222222222222',
-        '0x3333333333333333333333333333333333333333'
-    ])
-    
+    client.monitor_add(
+        ["0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333"]
+    )
+
     # Load addresses from a file
-    client.load_addresses_from_file('conf/addresses.txt')
-    
+    client.load_addresses_from_file("conf/addresses.txt")
+
     # Alternative method names (aliases)
-    client.add_address('0x4444444444444444444444444444444444444444')
-    client.add_addresses(['0x5555...', '0x6666...'])
+    client.add_address("0x4444444444444444444444444444444444444444")
+    client.add_addresses(["0x5555...", "0x6666..."])
 ```
 
 #### Address File Format
@@ -84,30 +83,29 @@ When using `load_addresses_from_file()`, the file should contain one address per
 ### Checking Addresses
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Check if a single address is monitored
-    is_monitored = client.monitor_has('0x1111111111111111111111111111111111111111')
+    is_monitored = client.monitor_has("0x1111111111111111111111111111111111111111")
     print(f"Monitored: {is_monitored}")  # True or False
-    
+
     # Check multiple addresses
-    results = client.monitor_has([
-        '0x1111111111111111111111111111111111111111',
-        '0x2222222222222222222222222222222222222222'
-    ])
+    results = client.monitor_has(
+        ["0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"]
+    )
     # Returns: {'0x1111...': True, '0x2222...': False}
-    
+
     # Alternative method name
-    is_monitored = client.is_monitored('0x1111...')
+    is_monitored = client.is_monitored("0x1111...")
 ```
 
 ### Listing Addresses
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Get count of monitored addresses
     count = client.monitor_count()
     print(f"Total monitored: {count}")
-    
+
     # Get all monitored addresses
     addresses = client.monitor_list()
     for addr in addresses:
@@ -117,25 +115,24 @@ with RPCClient(auth_token='your-token') as client:
 ### Removing Addresses
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Remove a single address
-    client.monitor_remove('0x1111111111111111111111111111111111111111')
-    
+    client.monitor_remove("0x1111111111111111111111111111111111111111")
+
     # Remove multiple addresses
-    client.monitor_remove([
-        '0x2222222222222222222222222222222222222222',
-        '0x3333333333333333333333333333333333333333'
-    ])
-    
+    client.monitor_remove(
+        ["0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333"]
+    )
+
     # Alternative method names
-    client.remove_address('0x4444...')
-    client.remove_addresses(['0x5555...', '0x6666...'])
+    client.remove_address("0x4444...")
+    client.remove_addresses(["0x5555...", "0x6666..."])
 ```
 
 ### Clearing All Addresses
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Must explicitly confirm to prevent accidental clearing
     client.monitor_clear(confirm=True)
 ```
@@ -143,13 +140,13 @@ with RPCClient(auth_token='your-token') as client:
 ### Health Checks
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Simple ping
     pong = client.ping()
-    
+
     # Get health status
     health = client.health()
-    
+
     # List available methods
     methods = client.methods()
     print(f"Available: {', '.join(methods)}")
@@ -163,7 +160,7 @@ with RPCClient(auth_token='your-token') as client:
 from python.rpc_client import RPCClient, RPCError
 
 try:
-    client = RPCClient(host='127.0.0.1', port=8080, auth_token='your-token')
+    client = RPCClient(host="127.0.0.1", port=8080, auth_token="your-token")
 except ConnectionError as e:
     print(f"Cannot connect to server: {e}")
     print("Make sure rpc_control is running!")
@@ -175,9 +172,9 @@ except ConnectionError as e:
 from python.rpc_client import RPCClient, RPCError
 
 try:
-    with RPCClient(auth_token='your-token') as client:
+    with RPCClient(auth_token="your-token") as client:
         # Some operation that might fail
-        result = client.monitor_add('invalid-address')
+        result = client.monitor_add("invalid-address")
 except RPCError as e:
     print(f"RPC Error {e.code}: {e.message}")
     if e.data:
@@ -189,7 +186,7 @@ except RPCError as e:
 ```python
 from python.rpc_client import RPCClient
 
-client = RPCClient(auth_token='your-token')
+client = RPCClient(auth_token="your-token")
 
 # This will raise ValueError
 try:
@@ -204,16 +201,17 @@ except ValueError as e:
 
 ```python
 # Set a custom timeout (in seconds)
-client = RPCClient(host='127.0.0.1', port=8080, timeout=60.0, auth_token='your-token')
+client = RPCClient(host="127.0.0.1", port=8080, timeout=60.0, auth_token="your-token")
 ```
 
 ### Multiple Clients
 
 ```python
 # You can have multiple client instances
-with RPCClient(host='server1.example.com', port=8080, auth_token='token-1') as client1, \
-     RPCClient(host='server2.example.com', port=8080, auth_token='token-2') as client2:
-    
+with (
+    RPCClient(host="server1.example.com", port=8080, auth_token="token-1") as client1,
+    RPCClient(host="server2.example.com", port=8080, auth_token="token-2") as client2,
+):
     count1 = client1.monitor_count()
     count2 = client2.monitor_count()
     print(f"Server 1: {count1}, Server 2: {count2}")
@@ -222,17 +220,17 @@ with RPCClient(host='server1.example.com', port=8080, auth_token='token-1') as c
 ### Batch Operations
 
 ```python
-with RPCClient(auth_token='your-token') as client:
+with RPCClient(auth_token="your-token") as client:
     # Prepare a list of addresses
-    addresses = [f'0x{i:040x}' for i in range(1, 11)]  # 10 addresses
-    
+    addresses = [f"0x{i:040x}" for i in range(1, 11)]  # 10 addresses
+
     # Add them all at once
     client.monitor_add(addresses)
-    
+
     # Verify they were all added
     count = client.monitor_count()
     print(f"Added {len(addresses)} addresses, count is now {count}")
-    
+
     # Remove them all at once
     client.monitor_remove(addresses)
 ```
@@ -246,25 +244,26 @@ Here's a complete example of monitoring Ethereum addresses loaded from a file:
 from python.rpc_client import RPCClient, RPCError
 import sys
 
+
 def setup_monitoring(addresses_file):
     """Load addresses from file and add to monitoring."""
     # Connect and add addresses using the built-in method
     try:
-        with RPCClient(auth_token='your-token') as client:
+        with RPCClient(auth_token="your-token") as client:
             print(f"Loading addresses from {addresses_file}...")
             result = client.load_addresses_from_file(addresses_file)
-            
+
             # Display results
             print(f"Successfully loaded addresses:")
-            if 'added' in result:
+            if "added" in result:
                 print(f"  Added: {len(result['added'])} new addresses")
-            if 'already_present' in result:
+            if "already_present" in result:
                 print(f"  Already present: {len(result['already_present'])} addresses")
-            
+
             # Verify
             count = client.monitor_count()
             print(f"Total monitored addresses: {count}")
-            
+
             return True
     except ConnectionError as e:
         print(f"Error: Cannot connect to RPC server: {e}", file=sys.stderr)
@@ -273,11 +272,12 @@ def setup_monitoring(addresses_file):
         print(f"Error: RPC operation failed: {e}", file=sys.stderr)
         return False
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: script.py <addresses_file>")
         sys.exit(1)
-    
+
     success = setup_monitoring(sys.argv[1])
     sys.exit(0 if success else 1)
 ```
@@ -289,16 +289,16 @@ if __name__ == '__main__':
 If you get `Connection refused` or `Failed to connect`, make sure:
 
 1. Redis/Valkey is running: `docker compose ps`
-2. The RPC control server is running: `zig build run-rpc-control -- --config conf/config.toml`
-3. The server is listening on the correct port (default: 8080)
+1. The RPC control server is running: `zig build run-rpc-control -- --config conf/config.toml`
+1. The server is listening on the correct port (default: 8080)
 
 ### Timeout Errors
 
 If operations timeout:
 
 1. Check if Redis is responsive
-2. Increase the timeout: `RPCClient(timeout=60.0, auth_token='your-token')`
-3. Check network connectivity
+1. Increase the timeout: `RPCClient(timeout=60.0, auth_token='your-token')`
+1. Check network connectivity
 
 ### Invalid Addresses
 
