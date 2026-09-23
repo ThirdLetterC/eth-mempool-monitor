@@ -3,17 +3,20 @@ Example script demonstrating how to load Ethereum addresses from a file
 and add them to the monitoring set using the RPC client.
 
 Usage:
-    python3 load_addresses_example.py <addresses_file> [host] [port] [auth_token]
+    python3 python/load_addresses_example.py <addresses_file> [host] [port] [auth_token]
 
 Example:
-    python3 load_addresses_example.py addresses.txt
-    python3 load_addresses_example.py addresses.txt 127.0.0.1 8080 my-secret-token
+    python3 python/load_addresses_example.py addresses.txt
+    python3 python/load_addresses_example.py addresses.txt 127.0.0.1 8080 my-secret-token
 """
 
 import os
 import sys
 
-from rpc_client import RPCClient, RPCError
+if __package__:
+    from .rpc_client import RPCClient, RPCError
+else:
+    from rpc_client import RPCClient, RPCError
 
 
 def _extract_count(count_result):

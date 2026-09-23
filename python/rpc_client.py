@@ -6,7 +6,7 @@ exposed by the rpc_control binary. The server manages monitored Ethereum address
 stored in Redis.
 
 Usage:
-    from rpc_client import RPCClient
+    from python.rpc_client import RPCClient
 
     # Connect to the RPC server
     client = RPCClient(host='127.0.0.1', port=8080, auth_token='your-token')

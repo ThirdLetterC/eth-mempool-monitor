@@ -25,7 +25,7 @@ zig build run-rpc-control -- --config conf/config.toml
 Run the built-in demo to see all features:
 
 ```bash
-python3 rpc_client.py 127.0.0.1 8080 your-token
+python3 python/rpc_client.py 127.0.0.1 8080 your-token
 ```
 
 ## Usage in Your Code
@@ -33,7 +33,7 @@ python3 rpc_client.py 127.0.0.1 8080 your-token
 ### Basic Connection
 
 ```python
-from rpc_client import RPCClient
+from python.rpc_client import RPCClient
 
 # Simple connection
 client = RPCClient(host='127.0.0.1', port=8080, auth_token='your-token')
@@ -160,7 +160,7 @@ with RPCClient(auth_token='your-token') as client:
 ### Connection Errors
 
 ```python
-from rpc_client import RPCClient, RPCError
+from python.rpc_client import RPCClient, RPCError
 
 try:
     client = RPCClient(host='127.0.0.1', port=8080, auth_token='your-token')
@@ -172,7 +172,7 @@ except ConnectionError as e:
 ### RPC Errors
 
 ```python
-from rpc_client import RPCClient, RPCError
+from python.rpc_client import RPCClient, RPCError
 
 try:
     with RPCClient(auth_token='your-token') as client:
@@ -187,7 +187,7 @@ except RPCError as e:
 ### Validation Errors
 
 ```python
-from rpc_client import RPCClient
+from python.rpc_client import RPCClient
 
 client = RPCClient(auth_token='your-token')
 
@@ -243,7 +243,7 @@ Here's a complete example of monitoring Ethereum addresses loaded from a file:
 
 ```python
 #!/usr/bin/env python3
-from rpc_client import RPCClient, RPCError
+from python.rpc_client import RPCClient, RPCError
 import sys
 
 def setup_monitoring(addresses_file):
