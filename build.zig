@@ -299,6 +299,7 @@ pub fn build(b: *std.Build) void {
     monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher_connection.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher_replay.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber.c"), .flags = c_flags });
+    monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber_message.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_config.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_runtime.c"), .flags = c_flags });
     monitor_module.addCSourceFile(.{ .file = b.path("src/main.c"), .flags = c_flags });
@@ -395,6 +396,8 @@ pub fn build(b: *std.Build) void {
     rpc_control_module.addIncludePath(b.path("include"));
     rpc_control_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
     rpc_control_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
+    rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control_config.c"), .flags = jsonrpc_c_flags });
+    rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control_service.c"), .flags = jsonrpc_c_flags });
     rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control.c"), .flags = jsonrpc_c_flags });
     if (mimalloc_dependency) |dependency| {
         rpc_control_module.addIncludePath(dependency.path("include"));

@@ -3,11 +3,11 @@
 ## Data Flow
 
 1. `rpc_control` manages a Redis set (`redis.monitored_set_key`).
-2. `eth_mempool_monitor` subscribes to `eth_subscribe` (`newPendingTransactions`).
-3. If a provider returns only a transaction hash, the monitor requests the full
+1. `eth_mempool_monitor` subscribes to `eth_subscribe` (`newPendingTransactions`).
+1. If a provider returns only a transaction hash, the monitor requests the full
    transaction with `eth_getTransactionByHash`.
-4. The monitor checks each transaction's `from` and `to` addresses in Redis.
-5. Matching transactions are published to RabbitMQ as JSON.
+1. The monitor checks each transaction's `from` and `to` addresses in Redis.
+1. Matching transactions are published to RabbitMQ as JSON.
 
 ## Application Modules
 
@@ -17,6 +17,15 @@
   logging configuration, and sensitive string cleanup.
 - `monitor_runtime.c` owns signal handling, integration configuration, and the
   bounded reconnect loop.
+- `subscriber.c` owns WebSocket/Redis/RabbitMQ resource lifecycles and the
+  receive loop.
+- `subscriber_message.c` owns untrusted WebSocket message parsing, transaction
+  lookup correlation, Redis membership checks, and matched-event publication.
+- `rpc_control.c` is the RPC server process entry point and signal coordinator.
+- `rpc_control_config.c` owns RPC CLI/TOML parsing, validation, logging setup,
+  and configuration cleanup.
+- `rpc_control_service.c` owns RPC authentication state, Redis commands, and
+  JSON-RPC method dispatch.
 
 ## RabbitMQ Event Payload
 
