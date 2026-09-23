@@ -6,7 +6,12 @@
 #include <sys/time.h>
 #include <time.h>
 
-/* Broker replies, envelopes, and acknowledgement results are untrusted. */
+/*
+ * RabbitMQ connection and consumption layer.
+ *
+ * Broker replies, envelopes, and acknowledgement results are untrusted.
+ * Manual acknowledgement happens only after payload processing returns.
+ */
 
 static void app_log_rpc_failure(const char *action, amqp_rpc_reply_t reply) {
   if (action == nullptr) {

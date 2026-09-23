@@ -10,6 +10,12 @@
 #include <string.h>
 #include <strings.h>
 
+/*
+ * Console configuration boundary.
+ *
+ * Parsed strings are copied into owned fields, numeric values are range
+ * checked, and credentials are cleared before their storage is released.
+ */
 constexpr char APP_DEFAULT_CONFIG_PATH[] = "conf/config.toml";
 constexpr char APP_DEFAULT_RABBITMQ_HOST[] = "127.0.0.1";
 constexpr uint16_t APP_DEFAULT_RABBITMQ_PORT = 5'672;
@@ -25,8 +31,6 @@ constexpr uint16_t APP_DEFAULT_PREFETCH_COUNT = 200;
 constexpr bool APP_DEFAULT_AUTO_ACK = false;
 constexpr ulog_level APP_DEFAULT_LOG_LEVEL = ULOG_LEVEL_INFO;
 constexpr bool APP_DEFAULT_LOG_COLOR = true;
-
-/* External CLI and TOML values are validated before configuration updates. */
 
 void app_print_usage(const char *program_name) {
   printf("Usage: %s [options]\n", program_name);
@@ -286,6 +290,7 @@ void app_config_cleanup(app_config_t *config) {
   return true;
 }
 
+/* Load the optional TOML layer over defaults; CLI remains higher priority. */
 [[nodiscard]] bool app_load_toml_config(app_config_t *config,
                                         const app_cli_overrides_t *overrides) {
   if (config == nullptr || overrides == nullptr) {
@@ -448,6 +453,7 @@ void app_config_cleanup(app_config_t *config) {
   return ok;
 }
 
+/* Store borrowed argv views without transferring their ownership. */
 [[nodiscard]] bool app_parse_cli(int argc, char *argv[],
                                  app_cli_overrides_t *overrides) {
   if (overrides == nullptr) {
@@ -579,6 +585,7 @@ void app_config_cleanup(app_config_t *config) {
   return true;
 }
 
+/* Commit validated CLI values as the final configuration layer. */
 [[nodiscard]] bool
 app_apply_cli_overrides(app_config_t *config,
                         const app_cli_overrides_t *overrides) {

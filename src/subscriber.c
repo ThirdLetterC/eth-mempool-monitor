@@ -6,6 +6,13 @@
 
 #include <string.h>
 
+/*
+ * Subscriber lifecycle and resource-ownership layer.
+ *
+ * This module acquires Redis, RabbitMQ, and WebSocket resources, drives the
+ * receive loop, and releases every successfully acquired resource on exit.
+ * Message interpretation is isolated in subscriber_message.c.
+ */
 constexpr size_t WS_SUBSCRIBER_MESSAGE_CAPACITY = 64 * 1024;
 constexpr char WS_SUBSCRIBER_ERR_BUFFER_TOO_SMALL_PREFIX[] =
     "Receive buffer is too small";
@@ -55,6 +62,7 @@ ws_subscriber_listen_ex(ws_client_t *client,
     auto action =
         ws_subscriber_handle_message(message, message_length, runtime_config);
     if (action == WS_SUBSCRIBER_MESSAGE_ACTION_RECONNECT) {
+      /* monitor_runtime owns retry policy after this attempt unwinds. */
       ws_client_close(client);
       return false;
     }
@@ -112,6 +120,7 @@ void ws_subscriber_set_stop_check(ws_subscriber_stop_check_fn stop_check) {
     return false;
   }
 
+  /* Resources are acquired in dependency order and remain owned locally. */
   ws_subscriber_runtime_config_t runtime_config = {0};
   if (redis_config != nullptr) {
     if (redis_config->host == nullptr ||
@@ -223,6 +232,7 @@ void ws_subscriber_set_stop_check(ws_subscriber_stop_check_fn stop_check) {
     ulog_info("Shutdown requested, closing subscriber");
   }
 
+  /* Reverse-order teardown also handles a normal stop request. */
   ws_client_destroy(client);
   if (runtime_config.redis != nullptr) {
     redisFree(runtime_config.redis);

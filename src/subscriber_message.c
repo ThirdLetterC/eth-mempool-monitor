@@ -12,6 +12,13 @@
 #include <sys/time.h>
 #include <time.h>
 
+/*
+ * Untrusted WebSocket message-processing layer.
+ *
+ * Subscription notifications can contain a full transaction or only a hash.
+ * Hash-only notifications are correlated with bounded follow-up requests.
+ * Validated addresses are checked in Redis before an event is published.
+ */
 constexpr size_t WS_SUBSCRIBER_ADDRESS_CAPACITY = 128;
 constexpr size_t WS_SUBSCRIBER_MAX_LOOKUP_MEMBERS = 2;
 constexpr size_t WS_SUBSCRIBER_TX_LOOKUP_REQUEST_CAPACITY = 256;
@@ -182,6 +189,7 @@ ws_subscriber_reserve_pending_tx_lookup(
 
     lookup->in_use = true;
     lookup->request_id = request_id;
+    /* Validation guarantees a complete fixed-size hash including its NUL. */
     memcpy(lookup->tx_hash, tx_hash, WS_SUBSCRIBER_TX_HASH_CAPACITY);
     runtime_config->pending_tx_lookup_count += 1;
     return lookup;
@@ -219,6 +227,7 @@ static void ws_subscriber_release_pending_tx_lookup(
     return true;
   }
 
+  /* Reserve correlation state before sending the follow-up request. */
   uint64_t request_id = runtime_config->next_tx_lookup_request_id;
   runtime_config->next_tx_lookup_request_id += 1;
   if (runtime_config->next_tx_lookup_request_id == 0) {
@@ -334,6 +343,7 @@ ws_subscriber_decode_sismember_reply(const redisReply *reply,
   return ok;
 }
 
+/* Execute one Redis membership batch and validate every returned element. */
 [[nodiscard]] static bool ws_subscriber_redis_sismember_batch_once(
     redisContext *redis, const char *set_key, const char *const *members,
     size_t member_count, bool *out_member_present) {
@@ -427,6 +437,7 @@ ws_subscriber_json_set_optional_string(JSON_Object *object, const char *name,
   return json_object_set_null(object, name) == JSONSuccess;
 }
 
+/* Construct a stable event envelope before handing it to the publisher. */
 static void ws_subscriber_publish_transaction_match(
     const JSON_Object *tx, const char *tx_hash, const char *from,
     const char *to, bool from_monitored, bool to_monitored,
@@ -493,6 +504,7 @@ static void ws_subscriber_publish_transaction_match(
   json_value_free(event_value);
 }
 
+/* Normalize a full transaction and evaluate its from/to addresses together. */
 static void ws_subscriber_handle_transaction_object(
     const JSON_Object *tx, ws_subscriber_runtime_config_t *runtime_config) {
   if (tx == nullptr) {
@@ -598,6 +610,7 @@ static void ws_subscriber_handle_transaction_object(
   }
 }
 
+/* Resolve a follow-up response against its previously reserved hash entry. */
 static void ws_subscriber_handle_pending_tx_lookup_response(
     const JSON_Object *object, const ws_subscriber_pending_tx_lookup_t *lookup,
     ws_subscriber_runtime_config_t *runtime_config) {
@@ -647,6 +660,7 @@ static void ws_subscriber_handle_pending_tx_lookup_response(
 [[nodiscard]] ws_subscriber_message_action_t
 ws_subscriber_handle_message(const char *message, size_t message_length,
                              ws_subscriber_runtime_config_t *runtime_config) {
+  /* The receive layer guarantees NUL termination inside its bounded buffer. */
   auto root = json_parse_string(message);
   if (root == nullptr) {
     ulog_warn("Non-JSON websocket message (%zu bytes): %s", message_length,

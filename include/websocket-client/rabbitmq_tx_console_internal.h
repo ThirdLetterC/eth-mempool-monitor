@@ -7,6 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * Internal console boundary. Configuration owns its *_owned strings; CLI
+ * overrides are borrowed argv views and the consumer owns only AMQP handles.
+ */
 typedef struct app_config app_config_t;
 struct app_config {
   const char *rabbitmq_host;
@@ -53,6 +57,7 @@ typedef struct app_rabbitmq_consumer app_rabbitmq_consumer_t;
 struct app_rabbitmq_consumer {
   amqp_connection_state_t connection;
   amqp_channel_t channel;
+  /* Flags make teardown safe after partially completed connection setup. */
   bool logged_in;
   bool channel_open;
 };

@@ -10,7 +10,13 @@
 constexpr uint64_t APP_WEI_PER_GWEI = 1'000'000'000ULL;
 constexpr uint64_t APP_WEI_PER_ETH = 1'000'000'000'000'000'000ULL;
 
-/* Broker-controlled JSON is bounded, parsed, and type-checked before use. */
+/*
+ * Transaction-event presentation layer.
+ *
+ * Broker-controlled JSON is bounded, parsed, and type-checked before use.
+ * Large hexadecimal quantities remain strings unless they fit in uint64_t,
+ * preventing silent precision loss in human-readable output.
+ */
 
 [[nodiscard]] static const char *app_safe_string(const char *value) {
   return value != nullptr ? value : "(null)";

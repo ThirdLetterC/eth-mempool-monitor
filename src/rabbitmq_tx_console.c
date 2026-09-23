@@ -11,7 +11,13 @@
 #include <mimalloc.h>
 #endif
 
-/* Signals and command-line arguments are external process inputs. */
+/*
+ * RabbitMQ console process entry point.
+ *
+ * Signals and command-line arguments are external process inputs. Allocator
+ * hooks are configured before parsing so TOML and JSON allocations use the
+ * same allocator as the rest of the process.
+ */
 
 volatile sig_atomic_t app_shutdown_signal = 0;
 

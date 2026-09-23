@@ -10,9 +10,17 @@
 #include <stdlib.h>
 #include <uv.h>
 
+/*
+ * JSON-RPC control process entry point.
+ *
+ * Configuration, Redis state, and the libuv server are initialized in that
+ * order. Shutdown reverses the owned-resource portion of that sequence.
+ */
 static volatile sig_atomic_t g_shutdown_signal = 0;
 
 static void rpc_control_on_signal(uv_signal_t *handle, int signum) {
+  /* libuv invokes this callback on its event-loop thread, so requesting an
+   * orderly server shutdown is safe here. */
   g_shutdown_signal = signum;
   (void)uv_signal_stop(handle);
   uv_close((uv_handle_t *)handle, nullptr);

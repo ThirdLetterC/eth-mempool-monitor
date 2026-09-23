@@ -8,6 +8,10 @@
 #include <wolfssl/options.h>
 #include <wolfssl/openssl/ssl.h>
 
+/*
+ * Private WebSocket transport boundary. ws_client owns socket_fd, ssl_ctx,
+ * and ssl while connected; public callers interact with the opaque type only.
+ */
 constexpr size_t WS_ERROR_MESSAGE_CAPACITY = 256;
 
 struct ws_client {
@@ -21,11 +25,13 @@ struct ws_client {
   char last_error[WS_ERROR_MESSAGE_CAPACITY];
 };
 
+/* Error helpers always write within the fixed last_error buffer. */
 void ws_set_error(ws_client_t *client, const char *format, ...);
 void ws_transport_set_read_error(ws_client_t *client, const char *context,
                                  ssize_t transport_result, SSL *ssl,
                                  bool use_tls, uint32_t read_timeout_seconds);
 
+/* Transport helpers borrow buffers and never retain caller-owned pointers. */
 [[nodiscard]] ssize_t ws_transport_receive(int fd, SSL *ssl, bool use_tls,
                                            uint8_t *buffer, size_t length);
 [[nodiscard]] bool ws_transport_read_exact(ws_client_t *client, uint8_t *buffer,

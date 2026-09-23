@@ -13,6 +13,13 @@
 #include <string.h>
 #include <time.h>
 
+/*
+ * Runtime orchestration for the monitor process.
+ *
+ * Signal handlers only set a sig_atomic_t flag. Normal control flow observes
+ * that flag, closes network resources, and performs logging outside signal
+ * context.
+ */
 static volatile sig_atomic_t app_shutdown_signal = 0;
 
 static void app_handle_shutdown_signal(int signal_number) {
@@ -134,6 +141,8 @@ static void app_log_startup_config(const app_config *config) {
   uint32_t reconnect_backoff_ms = config->reconnect_initial_backoff_ms;
   size_t reconnect_attempt = 0;
   bool ok = false;
+
+  /* A successful run or an explicit shutdown terminates the reconnect loop. */
   while (true) {
     ok = ws_subscriber_run_ex_with_integrations_and_timeouts(
         config->host, config->port, config->path, config->request,
@@ -152,6 +161,7 @@ static void app_log_startup_config(const app_config *config) {
       break;
     }
 
+    /* Saturating exponential backoff avoids overflow and reconnect storms. */
     if (reconnect_backoff_ms < config->reconnect_max_backoff_ms) {
       uint64_t next_backoff = (uint64_t)reconnect_backoff_ms * 2U;
       reconnect_backoff_ms = (next_backoff > config->reconnect_max_backoff_ms)

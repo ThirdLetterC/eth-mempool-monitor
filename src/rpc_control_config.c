@@ -21,6 +21,13 @@
 #include <mimalloc.h>
 #endif
 
+/*
+ * Configuration boundary for rpc_control.
+ *
+ * CLI and TOML strings are untrusted borrowed views. Accepted values are
+ * copied into explicit owned fields and released by rpc_control_config_cleanup.
+ * The authentication token is never included in diagnostic output.
+ */
 constexpr int32_t RPC_CONTROL_DEFAULT_PORT = 8080;
 constexpr char RPC_CONTROL_DEFAULT_HOST[] = "127.0.0.1";
 constexpr int32_t RPC_CONTROL_DEFAULT_BACKLOG = 4096;
@@ -44,6 +51,8 @@ static const char *const RPC_CONTROL_METHOD_NAMES[] = {
 
 void rpc_control_configure_allocator_overrides() {
 #if defined(USE_MIMALLOC)
+  /* TOML allocates through realloc(nullptr, size), so both callbacks must
+   * belong to the same allocator family. */
   toml_option_t toml_options = toml_default_option();
   toml_options.mem_realloc = mi_realloc;
   toml_options.mem_free = mi_free;
@@ -318,6 +327,7 @@ static bool rpc_control_parse_i32_positive(const char *text,
   return true;
 }
 
+/* Load TOML values over defaults while retaining ownership in config. */
 [[nodiscard]] bool
 rpc_control_load_toml_config(rpc_control_config_t *config,
                              const rpc_control_cli_overrides_t *overrides) {
@@ -420,6 +430,7 @@ rpc_control_load_toml_config(rpc_control_config_t *config,
   return ok;
 }
 
+/* Parse argv into borrowed views; this phase does not mutate config. */
 [[nodiscard]] bool
 rpc_control_parse_cli(int argc, char *argv[],
                       rpc_control_cli_overrides_t *overrides) {
@@ -514,6 +525,7 @@ rpc_control_parse_cli(int argc, char *argv[],
   return true;
 }
 
+/* Validate and apply CLI values as the highest-precedence layer. */
 [[nodiscard]] bool
 rpc_control_apply_cli_overrides(rpc_control_config_t *config,
                                 const rpc_control_cli_overrides_t *overrides) {

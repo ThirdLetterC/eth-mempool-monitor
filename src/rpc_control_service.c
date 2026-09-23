@@ -19,6 +19,13 @@
 #include "rpc_control/service_internal.h"
 #include "ulog/ulog.h"
 
+/*
+ * Authenticated JSON-RPC service and Redis command layer.
+ *
+ * Each connection must authenticate before state-bearing methods are
+ * dispatched. Request values and Redis replies are treated as untrusted and
+ * validated before they update process state or become JSON responses.
+ */
 constexpr size_t RPC_CONTROL_ADDRESS_CAPACITY = 128;
 constexpr char RPC_CONTROL_NON_STRING[] = "<non-string>";
 
@@ -95,6 +102,7 @@ rpc_control_mark_connection_authenticated(jsonrpc_conn_t *conn) {
 
   if (g_runtime.authenticated_connection_count ==
       g_runtime.authenticated_connection_capacity) {
+    /* Grow geometrically while checking both element and byte counts. */
     size_t new_capacity = 0;
     if (g_runtime.authenticated_connection_capacity == 0) {
       new_capacity = 16;
@@ -158,6 +166,7 @@ static void rpc_control_forget_connection_auth(jsonrpc_conn_t *conn) {
   }
 }
 
+/* Establish the sole Redis context retained by the service runtime. */
 [[nodiscard]] bool
 rpc_control_connect_redis(const rpc_control_config_t *config) {
   g_runtime.auth_token = config->auth_token;
@@ -387,6 +396,7 @@ rpc_control_address_input_get(const rpc_control_address_input_t *input,
   return nullptr;
 }
 
+/* Redis helpers validate reply types before exposing result values. */
 static bool rpc_control_redis_sadd(const char *member, bool *out_added) {
   if (member == nullptr || out_added == nullptr) {
     return false;
@@ -599,6 +609,7 @@ static bool rpc_control_set_error(jsonrpc_response_t *response, int32_t code,
   return true;
 }
 
+/* Method handlers build complete responses only after all validation passes. */
 static bool rpc_control_handle_add(const JSON_Value *params,
                                    jsonrpc_response_t *response) {
   rpc_control_address_input_t input = {0};
@@ -1209,6 +1220,7 @@ bool rpc_control_on_request([[maybe_unused]] jsonrpc_conn_t *conn,
     return rpc_control_handle_auth(conn, params, response);
   }
 
+  /* Only ping and auth are intentionally reachable before authentication. */
   if (!rpc_control_is_connection_authenticated(conn)) {
     return rpc_control_set_error(
         response, JSONRPC_ERR_UNAUTHORIZED,

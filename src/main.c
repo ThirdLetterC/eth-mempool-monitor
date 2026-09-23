@@ -11,6 +11,13 @@
 #include <mimalloc.h>
 #endif
 
+/*
+ * Monitor process entry point.
+ *
+ * Allocator hooks must be installed before configuration parsing because TOML
+ * and JSON values can outlive the call that created them. The single cleanup
+ * path then releases all configuration-owned strings with the same allocator.
+ */
 static void app_configure_allocator_overrides() {
 #if defined(USE_MIMALLOC)
   toml_option_t toml_options = toml_default_option();
@@ -24,6 +31,7 @@ static void app_configure_allocator_overrides() {
 int main(int argc, char *argv[]) {
   app_configure_allocator_overrides();
 
+  /* Configuration owns any strings copied from TOML or command-line input. */
   int exit_code = EXIT_FAILURE;
   app_config config = {0};
   app_cli_overrides overrides = {0};

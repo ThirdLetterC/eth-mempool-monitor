@@ -7,8 +7,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * Private publisher state shared by lifecycle, connection, and replay modules.
+ * All *_owned pointers belong to the publisher. Broker handles are valid only
+ * while their corresponding logged_in/channel_open flags are set.
+ */
 typedef struct ws_rabbitmq_replay_message ws_rabbitmq_replay_message_t;
 struct ws_rabbitmq_replay_message {
+  /* Owned payload copy retained until publish succeeds or the queue clears. */
   char *payload;
   size_t payload_length;
 };
@@ -33,6 +39,8 @@ struct ws_rabbitmq_publisher {
   bool queue_durable;
   bool logged_in;
   bool channel_open;
+
+  /* Bounded ring buffer used to preserve messages across reconnects. */
   ws_rabbitmq_replay_message_t *replay_queue;
   size_t replay_count;
   size_t replay_capacity;
@@ -44,12 +52,15 @@ struct ws_rabbitmq_publisher {
   uint64_t replay_queue_dropped_messages;
 };
 
+/* Connection functions do not own the publisher passed to them. */
 [[nodiscard]] bool
 ws_rabbitmq_connection_open(ws_rabbitmq_publisher_t *publisher);
 void ws_rabbitmq_connection_close(ws_rabbitmq_publisher_t *publisher);
 [[nodiscard]] bool
 ws_rabbitmq_connection_publish(ws_rabbitmq_publisher_t *publisher,
                                const char *payload, size_t payload_length);
+
+/* Retry and replay functions mutate only the publisher's bounded queue. */
 [[nodiscard]] bool
 ws_rabbitmq_retry_allows_flush(ws_rabbitmq_publisher_t *publisher);
 void ws_rabbitmq_retry_record_failure(ws_rabbitmq_publisher_t *publisher);

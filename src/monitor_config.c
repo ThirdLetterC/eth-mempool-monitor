@@ -348,6 +348,8 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   return true;
 }
 
+/* Load the optional TOML layer over defaults; no CLI values are applied here.
+ */
 [[nodiscard]] bool app_load_toml_config(app_config *config,
                                         const app_cli_overrides *overrides) {
   FILE *fp = fopen(overrides->config_path, "rb");
@@ -553,6 +555,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   return ok;
 }
 
+/* Parse argv into borrowed views so validation and mutation stay separate. */
 [[nodiscard]] bool app_parse_cli(int argc, char *argv[],
                                  app_cli_overrides *overrides) {
   *overrides = (app_cli_overrides){0};
@@ -700,6 +703,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   return true;
 }
 
+/* Apply the highest-precedence configuration layer after full validation. */
 [[nodiscard]] bool app_apply_cli_overrides(app_config *config,
                                            const app_cli_overrides *overrides) {
   if (overrides->host != nullptr &&
