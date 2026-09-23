@@ -191,7 +191,7 @@ docker exec -it rpc_control /usr/local/bin/rabbitmq_tx_console --config /config/
 
 ## Configuration
 
-Configuration details were moved to [`CONFIG.md`](CONFIG.md).
+Configuration details were moved to [`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## `rpc_control` JSON-RPC API
 
@@ -248,7 +248,7 @@ Publishing uses RabbitMQ publisher confirms with in-process replay retries
 ## Python RPC Client
 
 A Python client library is provided for easy interaction with the `rpc_control` server.
-For full documentation, see [`PYTHON_CLIENT.md`](PYTHON_CLIENT.md).
+For full documentation, see [`docs/PYTHON_CLIENT.md`](docs/PYTHON_CLIENT.md).
 
 ### Installation
 
