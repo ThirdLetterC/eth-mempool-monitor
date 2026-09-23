@@ -1,5 +1,8 @@
 # ETH Mempool Monitor
 
+[![Compile](https://github.com/ThirdLetterC/eth-mempool-monitor/actions/workflows/compile.yml/badge.svg)](https://github.com/ThirdLetterC/eth-mempool-monitor/actions/workflows/compile.yml)
+[![Python quality](https://github.com/ThirdLetterC/eth-mempool-monitor/actions/workflows/python.yml/badge.svg)](https://github.com/ThirdLetterC/eth-mempool-monitor/actions/workflows/python.yml)
+
 `eth-mempool-monitor` subscribes to Ethereum pending transactions over WebSocket,
 filters them against addresses stored in Redis/Valkey, and publishes matching
 transactions to RabbitMQ.
