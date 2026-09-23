@@ -272,6 +272,9 @@ pub fn build(b: *std.Build) void {
     });
     lib_module.addIncludePath(b.path("include"));
     lib_module.addCSourceFile(.{ .file = b.path("src/ws_client.c"), .flags = c_flags });
+    lib_module.addCSourceFile(.{ .file = b.path("src/ws_frame.c"), .flags = c_flags });
+    lib_module.addCSourceFile(.{ .file = b.path("src/ws_handshake.c"), .flags = c_flags });
+    lib_module.addCSourceFile(.{ .file = b.path("src/ws_transport.c"), .flags = c_flags });
 
     const lib = b.addLibrary(.{
         .name = "websocket_client",

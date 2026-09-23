@@ -32,13 +32,14 @@ void ws_client_destroy(ws_client_t *client);
 /**
  * @brief Sends one text frame.
  */
-bool ws_client_send_text(ws_client_t *client, const char *text, size_t length);
+[[nodiscard]] bool ws_client_send_text(ws_client_t *client, const char *text,
+                                       size_t length);
 
 /**
  * @brief Sends one binary frame.
  */
-bool ws_client_send_binary(ws_client_t *client, const uint8_t *data,
-                           size_t length);
+[[nodiscard]] bool ws_client_send_binary(ws_client_t *client,
+                                         const uint8_t *data, size_t length);
 
 /**
  * @brief Receives one text frame into a caller-owned buffer.
