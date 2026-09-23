@@ -1,7 +1,7 @@
 # Zig build artifacts
-.zig-cache/
-zig-out/
-zig-pkg/
+/.zig-cache/
+/zig-out/
+/zig-pkg/
 
 # C/C++ build outputs
 *.o
@@ -12,29 +12,61 @@ zig-pkg/
 *.dylib
 *.dll
 *.exe
+*.d
+*.dSYM/
+*.gcda
+*.gcno
+*.profdata
+*.profraw
 
 # Tooling outputs
-compile_commands.json
+/compile_commands.json
+/.cache/clangd/
+/.ruff_cache/
+/.mypy_cache/
+/.pytest_cache/
+/.pyright/
+/.tox/
+/.nox/
+/.coverage
+/.coverage.*
+/coverage.xml
+/htmlcov/
 
 # Crash dumps
 core
 core.*
+vgcore.*
+*.stackdump
 
 # Editor / OS noise
 .DS_Store
+._*
+Desktop.ini
 Thumbs.db
 .vscode/
 .idea/
+.fleet/
+*.swp
+*.swo
+*~
 
 # Python
-.venv/
+/.venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
 
+# Local environment and secret-bearing overrides
+.env
+.env.*
+!.env.example
+
+# Profiling and diagnostics
 massif.out*
+callgrind.out.*

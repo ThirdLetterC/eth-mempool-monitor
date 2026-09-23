@@ -1,11 +1,11 @@
-.git
-.gitignore
-.zig-cache
-zig-out
-__pycache__
-*.pyc
-*.pyo
-*.swp
-*.swo
-compose.yml
-rabbitmq-data
+# The builder only needs the Zig manifest and C source tree. An allowlist keeps
+# credentials, local configuration, caches, documentation, and VCS data out of
+# the Docker build context by default.
+**
+!Dockerfile
+!build.zig
+!build.zig.zon
+!include/
+!include/**
+!src/
+!src/**

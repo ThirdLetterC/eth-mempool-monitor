@@ -1,4 +1,7 @@
 # Bundled third-party sources are kept in their upstream format.
+.zig-cache/**
+zig-out/**
+zig-pkg/**
 include/hiredis/**
 include/jsonrpc/**
 include/parg/**
