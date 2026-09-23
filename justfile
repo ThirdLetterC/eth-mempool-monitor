@@ -18,6 +18,15 @@ build-valgrind:
 
 format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i
+    ruff format .
+
+python-tools:
+    python3 -m pip install --requirement requirements-dev.txt
+
+python-check:
+    ruff format --check .
+    ruff check .
+    pyright
 
 valgrind-rpc-control *args:
     zig build -Dvalgrind=true valgrind-rpc-control -- {{args}}

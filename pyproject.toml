@@ -1,0 +1,12 @@
+[tool.ruff]
+extend-exclude = ["*.md"]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.pyright]
+include = ["."]
+pythonVersion = "3.9"
+typeCheckingMode = "standard"
