@@ -348,7 +348,7 @@ The server may validate Ethereum address format. Ensure addresses:
 
 ## Requirements
 
-- Python 3.9.1+
-- `tomli` on Python 3.9 and 3.10; Python 3.11+ uses the standard-library TOML parser
+- Python 3.14+
+- No external runtime dependencies
 - Running `rpc_control` server
 - Redis/Valkey instance (for the server)

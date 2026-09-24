@@ -49,7 +49,7 @@ Create the Python development environment with
 [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv --python 3.13
+uv venv --python 3.14
 uv sync --only-dev
 source .venv/bin/activate
 ```

@@ -3,11 +3,9 @@ name = "eth-mempool-monitor"
 version = "0.1.0"
 description = "Ethereum mempool monitor and Python RPC client utilities"
 readme = "README.md"
-requires-python = ">=3.9.1"
+requires-python = ">=3.14"
 license = "GPL-3.0-only"
-dependencies = [
-    "tomli>=2.0.1; python_version < '3.11'",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [
@@ -24,7 +22,7 @@ package = false
 [tool.ruff]
 line-length = 100
 src = ["python"]
-target-version = "py39"
+target-version = "py314"
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -45,7 +43,7 @@ sequence_style = "block_style"
 [tool.pyright]
 exclude = ["**/__pycache__"]
 include = ["python", "tests"]
-pythonVersion = "3.9"
+pythonVersion = "3.14"
 reportUnnecessaryCast = "warning"
 reportUnnecessaryComparison = "warning"
 reportUnnecessaryContains = "warning"

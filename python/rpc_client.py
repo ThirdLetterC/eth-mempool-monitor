@@ -32,28 +32,24 @@ Usage:
 
 import json
 import socket
+import tomllib
 from contextlib import suppress
 from math import isfinite
 from pathlib import Path
 from threading import Lock
 from types import TracebackType
-from typing import Any, Optional, Union
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10
-    import tomli as tomllib  # pyright: ignore[reportMissingImports]
+from typing import Any
 
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
-AddressInput = Union[str, list[str]]
-JsonObject = dict[str, Any]
+type AddressInput = str | list[str]
+type JsonObject = dict[str, Any]
 
 
 class RPCError(Exception):
     """Exception raised when the RPC server returns an error."""
 
-    def __init__(self, code: int, message: str, data: Optional[Any] = None) -> None:
+    def __init__(self, code: int, message: str, data: Any = None) -> None:
         self.code = code
         self.message = message
         self.data = data
@@ -77,7 +73,7 @@ class RPCClient:
         host: str = "127.0.0.1",
         port: int = 8080,
         timeout: float = 30.0,
-        auth_token: Optional[str] = None,
+        auth_token: str | None = None,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ) -> None:
         """
@@ -108,7 +104,7 @@ class RPCClient:
         self.port = port
         self.timeout = float(timeout)
         self.max_response_bytes = max_response_bytes
-        self._socket: Optional[socket.socket] = None
+        self._socket: socket.socket | None = None
         self._receive_buffer = bytearray()
         self._request_id = 0
         self._request_lock = Lock()
@@ -155,7 +151,7 @@ class RPCClient:
 
             try:
                 chunk = self._socket.recv(4096)
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 self.close()
                 raise ConnectionError("Request timed out") from exc
             except OSError as exc:
@@ -170,7 +166,7 @@ class RPCClient:
     def _send_request(
         self,
         method: str,
-        params: Optional[Union[dict[str, Any], list[Any], str]] = None,
+        params: dict[str, Any] | list[Any] | str | None = None,
     ) -> Any:
         """
         Send a JSON-RPC request and return the result.
@@ -375,7 +371,7 @@ class RPCClient:
         """Alias for monitor_remove with a list of addresses."""
         return self.monitor_remove(addresses)
 
-    def monitor_has(self, address: AddressInput) -> Union[bool, dict[str, bool]]:
+    def monitor_has(self, address: AddressInput) -> bool | dict[str, bool]:
         """
         Check if one or more addresses are in the monitoring set.
 
@@ -396,7 +392,7 @@ class RPCClient:
         present_set = set(present)
         return {item: item in present_set for item in address}
 
-    def is_monitored(self, address: AddressInput) -> Union[bool, dict[str, bool]]:
+    def is_monitored(self, address: AddressInput) -> bool | dict[str, bool]:
         """Alias for monitor_has."""
         return self.monitor_has(address)
 
@@ -445,7 +441,7 @@ class RPCClient:
             "monitor_clear",
         )
 
-    def load_addresses_from_file(self, filepath: Union[str, Path]) -> dict[str, Any]:
+    def load_addresses_from_file(self, filepath: str | Path) -> dict[str, Any]:
         """
         Load addresses from a TOML file and add them to the monitoring set.
 
@@ -492,15 +488,15 @@ class RPCClient:
         if receive_buffer is not None:
             receive_buffer.clear()
 
-    def __enter__(self) -> "RPCClient":
+    def __enter__(self) -> RPCClient:
         """Context manager entry."""
         return self
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Context manager exit."""
         self.close()

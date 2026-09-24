@@ -1,12 +1,11 @@
 """Unit tests for the newline-delimited JSON-RPC client."""
 
 import json
-import socket
 import tempfile
 import unittest
 from collections import deque
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 from unittest.mock import patch
 
 from python.rpc_client import RPCClient, RPCError, RPCProtocolError
@@ -18,7 +17,7 @@ class StubSocket:
     def __init__(self, *responses: bytes) -> None:
         self.responses = deque(responses)
         self.sent: list[bytes] = []
-        self.timeout: Optional[float] = None
+        self.timeout: float | None = None
         self.closed = False
 
     def settimeout(self, timeout: float) -> None:
@@ -50,7 +49,7 @@ class RPCClientTests(unittest.TestCase):
         host: str = "127.0.0.1",
         port: int = 8080,
         timeout: float = 30.0,
-        auth_token: Optional[str] = None,
+        auth_token: str | None = None,
         max_response_bytes: int = 4 * 1024 * 1024,
     ) -> RPCClient:
         with patch("python.rpc_client.socket.create_connection", return_value=stub):
@@ -125,7 +124,7 @@ class RPCClientTests(unittest.TestCase):
         class TimeoutSocket(StubSocket):
             def recv(self, size: int) -> bytes:
                 del size
-                raise socket.timeout
+                raise TimeoutError
 
         stub = TimeoutSocket()
         client = self.create_client(stub)

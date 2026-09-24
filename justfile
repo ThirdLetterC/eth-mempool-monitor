@@ -26,7 +26,7 @@ check-c-format:
     find src include -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format --dry-run --Werror
 
 python-tools:
-    uv venv --python 3.13
+    uv venv --python 3.14
     uv sync --only-dev
 
 python-check:

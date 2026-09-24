@@ -13,7 +13,7 @@ Example:
 import argparse
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 if __package__:
     from .rpc_client import RPCClient, RPCError
@@ -48,7 +48,7 @@ def load_and_monitor_addresses(
     filepath: str,
     host: str = "127.0.0.1",
     port: int = 8080,
-    auth_token: Optional[str] = None,
+    auth_token: str | None = None,
 ) -> bool:
     """
     Load addresses from a file and add them to the monitoring set.
