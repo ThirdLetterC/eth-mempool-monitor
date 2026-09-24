@@ -315,8 +315,12 @@
 /* Define to 1 if you have the `gettimeofday' function. */
 #define HAVE_GETTIMEOFDAY 1
 
-/* Define to 1 if you have a working glibc-style strerror_r function. */
+/* Select the strerror_r ABI exposed by the target C library. */
+#if defined(__GLIBC__)
 #define HAVE_GLIBC_STRERROR_R 1
+#else
+#define HAVE_POSIX_STRERROR_R 1
+#endif
 
 /* Define to 1 if you have a working gmtime_r function. */
 #define HAVE_GMTIME_R 1
@@ -450,9 +454,6 @@
 
 /* Define to 1 if you have the <poll.h> header file. */
 #define HAVE_POLL_H 1
-
-/* Define to 1 if you have a working POSIX-style strerror_r function. */
-/* #undef HAVE_POSIX_STRERROR_R */
 
 /* Define to 1 if you have the <pwd.h> header file. */
 #define HAVE_PWD_H 1

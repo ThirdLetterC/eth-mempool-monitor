@@ -13,11 +13,6 @@ RUN apt-get update \
         ca-certificates \
         curl \
         xz-utils \
-        gcc \
-        libc6-dev \
-        pkg-config \
-        libwolfssl-dev \
-        libuv1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN case "${TARGETARCH}" in \
@@ -45,7 +40,16 @@ RUN case "${TARGETARCH}" in \
 WORKDIR /src
 COPY . .
 
-RUN zig build -Drelease=true -Dstrip=true -Dmimalloc=true
+RUN case "${TARGETARCH}" in \
+        amd64) build_target=x86_64-linux-musl ;; \
+        arm64) build_target=aarch64-linux-musl ;; \
+        *) \
+            echo "Unsupported architecture: ${TARGETARCH}" >&2; \
+            exit 1 \
+            ;; \
+    esac \
+    && zig build -Drelease=true -Dstrip=true -Dmimalloc=true \
+        -Dtarget="${build_target}" -Dcpu=baseline
 
 FROM ${DEBIAN_IMAGE} AS runtime
 

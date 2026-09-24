@@ -13,6 +13,14 @@
             .url = "git+https://github.com/curl/curl.git#01346829096c61b372692f6dc43ffa778c6caccd",
             .hash = "N-V-__8AAArHFgHURV07GX_f3kHvbn04Fs7IdNY0FLgP76Ov",
         },
+        .libuv = .{
+            .url = "git+https://github.com/libuv/libuv.git#1cfa32ff59c076ffb6ed735bbc8c18361558661f",
+            .hash = "N-V-__8AACwTRQDmmfDj0GPrcObUmVnktArTdpjkEvRZXTx0",
+        },
+        .wolfssl = .{
+            .url = "git+https://github.com/wolfSSL/wolfssl.git#ac01707f552c611fbd135cc723b2682b3e7f80f2",
+            .hash = "N-V-__8AAPhMWQf0AfQZBj09a8GS8HmcI1gcIMKqC5PmBx6a",
+        },
     },
     .paths = .{
         "build.zig",

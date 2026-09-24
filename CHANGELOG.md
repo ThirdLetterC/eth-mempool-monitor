@@ -13,9 +13,18 @@ are summarized from the commits contained in each tagged release.
 - Added optional environment-backed bearer authentication, bounded retry and
   exponential backoff, request timeouts, and at-least-once delivery through
   manual RabbitMQ acknowledgements.
-- Added pinned official libcurl 8.22.0 source integration, built directly as a static
-  HTTP/HTTPS-only library with wolfSSL, plus Docker and release packaging,
-  configuration documentation, and loopback webhook regression tests.
+- Added pinned official libcurl 8.22.0 source integration, built directly as a
+  static HTTP/HTTPS-only library with wolfSSL, plus Docker and release
+  packaging, configuration documentation, and loopback webhook regression
+  tests.
+
+### Changed
+
+- Build pinned wolfSSL 5.9.2 and libuv 1.52.1 directly from their official
+  sources instead of requiring system development packages.
+- Build published Linux x86-64 binaries against musl as fully static
+  executables, with CI checks rejecting ELF interpreters and dynamic
+  dependencies.
 
 ### Security
 

@@ -263,6 +263,89 @@ const curl_files = [_][]const u8{
     "ws.c",
 };
 
+const libuv_files = [_][]const u8{
+    "src/fs-poll.c",
+    "src/idna.c",
+    "src/inet.c",
+    "src/random.c",
+    "src/strscpy.c",
+    "src/strtok.c",
+    "src/thread-common.c",
+    "src/threadpool.c",
+    "src/timer.c",
+    "src/uv-common.c",
+    "src/uv-data-getter-setters.c",
+    "src/version.c",
+    "src/unix/async.c",
+    "src/unix/core.c",
+    "src/unix/dl.c",
+    "src/unix/fs.c",
+    "src/unix/getaddrinfo.c",
+    "src/unix/getnameinfo.c",
+    "src/unix/linux.c",
+    "src/unix/loop-watcher.c",
+    "src/unix/loop.c",
+    "src/unix/pipe.c",
+    "src/unix/poll.c",
+    "src/unix/process.c",
+    "src/unix/proctitle.c",
+    "src/unix/procfs-exepath.c",
+    "src/unix/random-devurandom.c",
+    "src/unix/random-getrandom.c",
+    "src/unix/random-sysctl-linux.c",
+    "src/unix/signal.c",
+    "src/unix/stream.c",
+    "src/unix/tcp.c",
+    "src/unix/thread.c",
+    "src/unix/tty.c",
+    "src/unix/udp.c",
+};
+
+const wolfssl_files = [_][]const u8{
+    "src/crl.c",
+    "src/internal.c",
+    "src/keys.c",
+    "src/ocsp.c",
+    "src/ssl.c",
+    "src/tls.c",
+    "src/tls13.c",
+    "src/wolfio.c",
+    "wolfcrypt/src/aes.c",
+    "wolfcrypt/src/asn.c",
+    "wolfcrypt/src/chacha.c",
+    "wolfcrypt/src/chacha20_poly1305.c",
+    "wolfcrypt/src/coding.c",
+    "wolfcrypt/src/cpuid.c",
+    "wolfcrypt/src/des3.c",
+    "wolfcrypt/src/dh.c",
+    "wolfcrypt/src/ecc.c",
+    "wolfcrypt/src/error.c",
+    "wolfcrypt/src/hash.c",
+    "wolfcrypt/src/hmac.c",
+    "wolfcrypt/src/integer.c",
+    "wolfcrypt/src/kdf.c",
+    "wolfcrypt/src/logging.c",
+    "wolfcrypt/src/md4.c",
+    "wolfcrypt/src/md5.c",
+    "wolfcrypt/src/memory.c",
+    "wolfcrypt/src/pkcs12.c",
+    "wolfcrypt/src/poly1305.c",
+    "wolfcrypt/src/pwdbased.c",
+    "wolfcrypt/src/random.c",
+    "wolfcrypt/src/rsa.c",
+    "wolfcrypt/src/sha.c",
+    "wolfcrypt/src/sha256.c",
+    "wolfcrypt/src/sha3.c",
+    "wolfcrypt/src/sha512.c",
+    "wolfcrypt/src/signature.c",
+    "wolfcrypt/src/sp_int.c",
+    "wolfcrypt/src/wc_encrypt.c",
+    "wolfcrypt/src/wc_mlkem.c",
+    "wolfcrypt/src/wc_mlkem_poly.c",
+    "wolfcrypt/src/wc_port.c",
+    "wolfcrypt/src/wolfmath.c",
+};
+
 fn makeCFlags(
     b: *std.Build,
     base_flags: []const []const u8,
@@ -296,6 +379,8 @@ fn makeCFlags(
 
 fn createCModule(
     b: *std.Build,
+    libuv_dependency: *std.Build.Dependency,
+    wolfssl_dependency: *std.Build.Dependency,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     strip_binaries: bool,
@@ -309,12 +394,15 @@ fn createCModule(
         .sanitize_c = sanitize_c,
     });
     module.addIncludePath(b.path("include"));
+    module.addIncludePath(libuv_dependency.path("include"));
+    module.addIncludePath(wolfssl_dependency.path("."));
     return module;
 }
 
 fn createCurlLibrary(
     b: *std.Build,
     dependency: *std.Build.Dependency,
+    wolfssl_dependency: *std.Build.Dependency,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Step.Compile {
@@ -331,6 +419,7 @@ fn createCurlLibrary(
     module.addIncludePath(b.path("include"));
     module.addIncludePath(dependency.path("include"));
     module.addIncludePath(dependency.path("lib"));
+    module.addIncludePath(wolfssl_dependency.path("."));
     module.addCMacro("BUILDING_LIBCURL", "1");
     module.addCMacro("CURL_STATICLIB", "1");
     module.addCMacro("CURL_HIDDEN_SYMBOLS", "1");
@@ -347,6 +436,82 @@ fn createCurlLibrary(
 
     return b.addLibrary(.{
         .name = "curl",
+        .linkage = .static,
+        .root_module = module,
+    });
+}
+
+fn createLibuvLibrary(
+    b: *std.Build,
+    dependency: *std.Build.Dependency,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    if (target.result.os.tag != .linux) {
+        @panic("the source-built libuv configuration currently supports Linux targets only");
+    }
+
+    const module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    module.addIncludePath(dependency.path("include"));
+    module.addIncludePath(dependency.path("src"));
+    module.addCSourceFiles(.{
+        .root = dependency.path("."),
+        .files = &libuv_files,
+        .flags = &.{
+            "-std=c23",
+            "-D_GNU_SOURCE=1",
+            "-D_POSIX_C_SOURCE=200112L",
+            "-D_FILE_OFFSET_BITS=64",
+            "-D_LARGEFILE_SOURCE=1",
+            "-fno-strict-aliasing",
+        },
+    });
+
+    return b.addLibrary(.{
+        .name = "uv",
+        .linkage = .static,
+        .root_module = module,
+    });
+}
+
+fn createWolfSslLibrary(
+    b: *std.Build,
+    dependency: *std.Build.Dependency,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    if (target.result.os.tag != .linux) {
+        @panic("the source-built wolfSSL configuration currently supports Linux targets only");
+    }
+
+    const module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    module.addIncludePath(b.path("include/wolfssl-build"));
+    module.addIncludePath(b.path("include"));
+    module.addIncludePath(dependency.path("."));
+    module.addCMacro("BUILDING_WOLFSSL", "1");
+    module.addCMacro("HAVE_CONFIG_H", "1");
+    module.addCMacro("WOLFSSL_USER_SETTINGS", "1");
+    module.addCSourceFiles(.{
+        .root = dependency.path("."),
+        .files = &wolfssl_files,
+        .flags = &.{
+            "-std=c23",
+            "-D_DEFAULT_SOURCE=1",
+            "-D_POSIX_C_SOURCE=200809L",
+            "-fvisibility=hidden",
+        },
+    });
+
+    return b.addLibrary(.{
+        .name = "wolfssl",
         .linkage = .static,
         .root_module = module,
     });
@@ -369,12 +534,18 @@ fn addExecutable(
     module: *std.Build.Module,
     enable_hardening: bool,
 ) *std.Build.Step.Compile {
+    const target = module.resolved_target orelse
+        @panic("executable module must have a resolved target");
     const executable = b.addExecutable(.{
         .name = name,
+        .linkage = if (target.result.abi.isMusl()) .static else null,
         .root_module = module,
     });
     if (enable_hardening) {
-        executable.pie = true;
+        // Zig's musl libc archive is not PIC-compatible with a static PIE
+        // link. The musl artifacts are still fully static and retain the
+        // compile-time stack and fortify protections.
+        executable.pie = !target.result.abi.isMusl();
         executable.link_z_relro = true;
         executable.link_z_lazy = false;
     }
@@ -389,13 +560,6 @@ fn linkOptionalLibrary(
     if (library) |enabled_library| {
         module.linkLibrary(enabled_library);
     }
-}
-
-fn linkStaticSystemLibrary(module: *std.Build.Module, name: []const u8) void {
-    module.linkSystemLibrary(name, .{
-        .preferred_link_mode = .static,
-        .search_strategy = .no_fallback,
-    });
 }
 
 fn addRunStep(
@@ -464,10 +628,15 @@ pub fn build(b: *std.Build) void {
         b.lazyDependency("mimalloc", .{}) orelse return
     else
         null;
+    const libuv_dependency = b.dependency("libuv", .{});
+    const wolfssl_dependency = b.dependency("wolfssl", .{});
+    const libuv_library = createLibuvLibrary(b, libuv_dependency, target, .ReleaseFast);
+    const wolfssl_library = createWolfSslLibrary(b, wolfssl_dependency, target, .ReleaseFast);
     const curl_dependency = b.dependency("curl", .{});
     const curl_library = createCurlLibrary(
         b,
         curl_dependency,
+        wolfssl_dependency,
         target,
         .ReleaseFast,
     );
@@ -525,7 +694,7 @@ pub fn build(b: *std.Build) void {
     const rabbitmq_c_flags = makeCFlags(
         b,
         &posix_c_flags,
-        &.{ "-DHAVE_POLL", "-DWC_NO_HARDEN" },
+        &.{ "-DHAVE_POLL", "-DHAVE_WOLFSSL_SSL_H", "-DWC_NO_HARDEN" },
         enable_hardening,
     );
     const jsonrpc_c_flags = makeCFlags(
@@ -568,7 +737,15 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    const websocket_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    const websocket_module = createCModule(
+        b,
+        libuv_dependency,
+        wolfssl_dependency,
+        target,
+        optimize,
+        strip_binaries,
+        sanitize_c,
+    );
     addCFiles(b, websocket_module, &.{"src/ws_frame.c"}, project_c_flags);
     addCFiles(b, websocket_module, &.{
         "src/ws_client.c",
@@ -584,6 +761,8 @@ pub fn build(b: *std.Build) void {
 
     const type_test_module = createCModule(
         b,
+        libuv_dependency,
+        wolfssl_dependency,
         target,
         .Debug,
         false,
@@ -597,7 +776,7 @@ pub fn build(b: *std.Build) void {
     );
     addCFiles(b, type_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     type_test_module.linkLibrary(websocket_library);
-    linkStaticSystemLibrary(type_test_module, "wolfssl");
+    type_test_module.linkLibrary(wolfssl_library);
     const type_test = b.addExecutable(.{
         .name = "type_safety_test",
         .root_module = type_test_module,
@@ -608,6 +787,8 @@ pub fn build(b: *std.Build) void {
 
     const http_config_test_module = createCModule(
         b,
+        libuv_dependency,
+        wolfssl_dependency,
         target,
         .Debug,
         false,
@@ -621,7 +802,7 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, http_config_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     http_config_test_module.addIncludePath(curl_dependency.path("include"));
     http_config_test_module.linkLibrary(curl_library);
-    linkStaticSystemLibrary(http_config_test_module, "wolfssl");
+    http_config_test_module.linkLibrary(wolfssl_library);
     const http_config_test = b.addExecutable(.{
         .name = "http_transmitter_config_test",
         .root_module = http_config_test_module,
@@ -631,6 +812,8 @@ pub fn build(b: *std.Build) void {
 
     const http_webhook_test_module = createCModule(
         b,
+        libuv_dependency,
+        wolfssl_dependency,
         target,
         .Debug,
         false,
@@ -644,7 +827,7 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, http_webhook_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     http_webhook_test_module.addIncludePath(curl_dependency.path("include"));
     http_webhook_test_module.linkLibrary(curl_library);
-    linkStaticSystemLibrary(http_webhook_test_module, "wolfssl");
+    http_webhook_test_module.linkLibrary(wolfssl_library);
     const http_webhook_test = b.addExecutable(.{
         .name = "http_transmitter_webhook_test",
         .root_module = http_webhook_test_module,
@@ -652,7 +835,15 @@ pub fn build(b: *std.Build) void {
     const run_http_webhook_test = b.addRunArtifact(http_webhook_test);
     test_step.dependOn(&run_http_webhook_test.step);
 
-    const monitor_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    const monitor_module = createCModule(
+        b,
+        libuv_dependency,
+        wolfssl_dependency,
+        target,
+        optimize,
+        strip_binaries,
+        sanitize_c,
+    );
     addCFiles(b, monitor_module, &.{
         "src/parg.c",
         "src/toml.c",
@@ -678,14 +869,22 @@ pub fn build(b: *std.Build) void {
         monitor_module.addIncludePath(dependency.path("include"));
     }
     monitor_module.linkLibrary(websocket_library);
-    linkStaticSystemLibrary(monitor_module, "uv");
-    linkStaticSystemLibrary(monitor_module, "wolfssl");
+    monitor_module.linkLibrary(libuv_library);
+    monitor_module.linkLibrary(wolfssl_library);
     linkOptionalLibrary(monitor_module, mimalloc_library);
 
     const monitor = addExecutable(b, "eth_mempool_monitor", monitor_module, enable_hardening);
     addRunStep(b, monitor, "run-example", "Run ETH mempool monitor");
 
-    const rabbitmq_console_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    const rabbitmq_console_module = createCModule(
+        b,
+        libuv_dependency,
+        wolfssl_dependency,
+        target,
+        optimize,
+        strip_binaries,
+        sanitize_c,
+    );
     addCFiles(b, rabbitmq_console_module, &.{
         "src/toml.c",
         "src/parson.c",
@@ -703,7 +902,7 @@ pub fn build(b: *std.Build) void {
     if (mimalloc_dependency) |dependency| {
         rabbitmq_console_module.addIncludePath(dependency.path("include"));
     }
-    linkStaticSystemLibrary(rabbitmq_console_module, "wolfssl");
+    rabbitmq_console_module.linkLibrary(wolfssl_library);
     linkOptionalLibrary(rabbitmq_console_module, mimalloc_library);
 
     const rabbitmq_console = addExecutable(
@@ -721,6 +920,8 @@ pub fn build(b: *std.Build) void {
 
     const http_transmitter_module = createCModule(
         b,
+        libuv_dependency,
+        wolfssl_dependency,
         target,
         optimize,
         strip_binaries,
@@ -743,7 +944,7 @@ pub fn build(b: *std.Build) void {
     }
     http_transmitter_module.addIncludePath(curl_dependency.path("include"));
     http_transmitter_module.linkLibrary(curl_library);
-    linkStaticSystemLibrary(http_transmitter_module, "wolfssl");
+    http_transmitter_module.linkLibrary(wolfssl_library);
     linkOptionalLibrary(http_transmitter_module, mimalloc_library);
 
     const http_transmitter = addExecutable(
@@ -759,7 +960,15 @@ pub fn build(b: *std.Build) void {
         "Run RabbitMQ-to-webhook transaction transmitter",
     );
 
-    const rpc_control_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    const rpc_control_module = createCModule(
+        b,
+        libuv_dependency,
+        wolfssl_dependency,
+        target,
+        optimize,
+        strip_binaries,
+        sanitize_c,
+    );
     addCFiles(b, rpc_control_module, &.{"src/toml.c"}, c_flags);
     addCFiles(b, rpc_control_module, &.{"src/ulog.c"}, ulog_c_flags);
     addCFiles(b, rpc_control_module, &.{
@@ -772,7 +981,7 @@ pub fn build(b: *std.Build) void {
     if (mimalloc_dependency) |dependency| {
         rpc_control_module.addIncludePath(dependency.path("include"));
     }
-    linkStaticSystemLibrary(rpc_control_module, "uv");
+    rpc_control_module.linkLibrary(libuv_library);
     linkOptionalLibrary(rpc_control_module, mimalloc_library);
 
     const rpc_control = addExecutable(b, "rpc_control", rpc_control_module, enable_hardening);

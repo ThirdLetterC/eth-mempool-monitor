@@ -4,10 +4,9 @@
 
 - Zig 0.16.0
 - uv for the Python development environment
-- wolfSSL development library (`libwolfssl`)
-- libuv development library (`libuv`)
-- Network access on the first build so Zig can fetch the pinned curl source;
-  `-Dmimalloc=true` also fetches the pinned mimalloc source dependency
+- Network access on the first build so Zig can fetch the pinned curl, wolfSSL,
+  and libuv sources; `-Dmimalloc=true` also fetches the pinned mimalloc source
+  dependency
 - Redis or Valkey at runtime
 - RabbitMQ at runtime
 
@@ -19,10 +18,17 @@ zig build
 
 Artifacts are installed under `zig-out/bin/`.
 
-The build compiles the official pinned curl source directly as a static
-HTTP/HTTPS-only library using wolfSSL. No curl build-system wrapper, shared
-libcurl, or OpenSSL runtime is required. curl, wolfSSL, and libuv are linked
-statically; glibc remains dynamically linked for host compatibility.
+The build compiles the official pinned curl, wolfSSL, and libuv sources
+directly as static libraries. No curl build-system wrapper, shared libcurl, or
+OpenSSL runtime is required. Native builds use the host libc. Published Linux
+x86-64 releases use musl and are fully static.
+
+Build the same fully static release artifacts locally with:
+
+```bash
+zig build -Dtarget=x86_64-linux-musl -Drelease=true -Dstrip=true \
+  -Dmimalloc=true -Dcpu=baseline
+```
 
 Available Zig steps:
 

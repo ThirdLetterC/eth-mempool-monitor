@@ -41,10 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             clang-format \
-            libc6-dev \
-            libuv1-dev \
-            libwolfssl-dev \
-            pkg-config
+            libc6-dev
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2.2.1
@@ -61,3 +58,5 @@ jobs:
           zig build
           zig build -Dmimalloc=true
           zig build test
+          zig build -Dtarget=x86_64-linux-musl -Drelease=true \
+            -Dstrip=true -Dmimalloc=true -Dcpu=baseline

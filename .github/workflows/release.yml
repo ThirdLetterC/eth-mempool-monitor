@@ -19,10 +19,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            libc6-dev \
-            libuv1-dev \
-            libwolfssl-dev \
-            pkg-config
+            libc6-dev
       - name: Install Zig
         uses: mlugg/setup-zig@v2.2.1
         with:
@@ -30,7 +27,7 @@ jobs:
       - name: Build release binaries
         run: >-
           zig build -Drelease=true -Dstrip=true -Dmimalloc=true
-          -Dcpu=baseline
+          -Dcpu=baseline -Dtarget=x86_64-linux-musl
       - name: Verify baseline release binaries
         run: |
           set -euo pipefail
@@ -45,9 +42,12 @@ jobs:
               echo "::error file=${path}::found non-baseline YMM/ZMM instructions"
               exit 1
             fi
-            if readelf -d "${path}" | grep -Eq \
-              'Shared library: \[(libcurl|libssl|libcrypto|libwolfssl|libuv)\.so'; then
-              echo "::error file=${path}::found a dynamic third-party dependency"
+            if readelf -l "${path}" | grep -q 'INTERP'; then
+              echo "::error file=${path}::found an ELF interpreter"
+              exit 1
+            fi
+            if readelf -d "${path}" 2>/dev/null | grep -q '(NEEDED)'; then
+              echo "::error file=${path}::found a dynamic dependency"
               exit 1
             fi
             "${path}" --help >/dev/null
