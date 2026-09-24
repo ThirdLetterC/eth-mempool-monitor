@@ -61,6 +61,9 @@ with RPCClient(auth_token="your-token") as client:
     # Load addresses from a file
     client.load_addresses_from_file("conf/addresses.toml")
 
+    # Stream a large generated file in bounded 1,000-address requests
+    summary = client.load_addresses_from_file_batched("binance_sep26_addresses.toml")
+
     # Alternative method names (aliases)
     client.add_address("0x4444444444444444444444444444444444444444")
     client.add_addresses(["0x5555...", "0x6666..."])
@@ -79,6 +82,12 @@ addresses = [
     "0x4444444444444444444444444444444444444444",
 ]
 ```
+
+Use `load_addresses_from_file_batched()` for large files. Files larger than 1 MiB
+must put `addresses = [` and `]` on separate lines with one canonical Ethereum
+address, followed by a comma, on each intervening line. This is the format emitted
+by `python/download_binance_addresses.py`. The method returns aggregate counts and
+does not retain per-address server responses in memory.
 
 ### Checking Addresses
 
@@ -262,14 +271,12 @@ def setup_monitoring(addresses_file):
     try:
         with RPCClient(auth_token="your-token") as client:
             print(f"Loading addresses from {addresses_file}...")
-            result = client.load_addresses_from_file(addresses_file)
+            result = client.load_addresses_from_file_batched(addresses_file)
 
             # Display results
             print(f"Successfully loaded addresses:")
-            if "added" in result:
-                print(f"  Added: {len(result['added'])} new addresses")
-            if "already_present" in result:
-                print(f"  Already present: {len(result['already_present'])} addresses")
+            print(f"  Added: {result['added_count']} new addresses")
+            print(f"  Already present: {result['already_present_count']} addresses")
 
             # Verify
             count = client.monitor_count()
@@ -331,6 +338,7 @@ The server may validate Ethereum address format. Ensure addresses:
 | `methods()` | - | list[str] | Get available RPC methods |
 | `monitor_add(address)` | str or list[str] | dict | Add address(es) to monitoring |
 | `load_addresses_from_file(filepath)` | str | dict | Load addresses from file and add to monitoring |
+| `load_addresses_from_file_batched(filepath)` | str | dict[str, int] | Stream and add a large address file in bounded batches |
 | `monitor_remove(address)` | str or list[str] | dict | Remove address(es) from monitoring |
 | `monitor_has(address)` | str or list[str] | bool or dict | Check if address(es) monitored |
 | `monitor_count()` | - | int | Get count of monitored addresses |

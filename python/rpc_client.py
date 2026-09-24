@@ -31,8 +31,10 @@ Usage:
 """
 
 import json
+import re
 import socket
 import tomllib
+from collections.abc import Callable, Iterator
 from contextlib import suppress
 from math import isfinite
 from pathlib import Path
@@ -41,9 +43,123 @@ from types import TracebackType
 from typing import Any
 
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+DEFAULT_ADDRESS_BATCH_SIZE = 1_000
+MAX_IN_MEMORY_ADDRESS_FILE_BYTES = 1024 * 1024
+
+_STREAMING_ARRAY_START = re.compile(r"addresses\s*=\s*\[\s*(?:#.*)?\Z")
+_STREAMING_ADDRESS = re.compile(r'"(?P<address>0x[0-9a-fA-F]{40})"\s*,\s*(?:#.*)?\Z', re.ASCII)
 
 type AddressInput = str | list[str]
 type JsonObject = dict[str, Any]
+
+
+def _validated_toml_addresses(filepath: Path) -> list[str]:
+    try:
+        with filepath.open("rb") as address_file:
+            document = tomllib.load(address_file)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Address file not found: {filepath}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Invalid TOML in address file {filepath}: {exc}") from exc
+    except OSError as exc:
+        raise OSError(f"Error reading address file {filepath}: {exc}") from exc
+
+    addresses = document.get("addresses")
+    if not isinstance(addresses, list) or not addresses:
+        raise ValueError(f"Address file must define a non-empty 'addresses' array: {filepath}")
+    if any(not isinstance(address, str) or not address.strip() for address in addresses):
+        raise ValueError(f"All entries in 'addresses' must be non-empty strings: {filepath}")
+    return addresses
+
+
+def _validate_streaming_toml_layout(filepath: Path) -> None:
+    """Validate the complete canonical large-file layout before changing Redis."""
+    array_started = False
+    array_closed = False
+    address_count = 0
+
+    try:
+        with filepath.open("r", encoding="utf-8-sig", newline="") as address_file:
+            for line_number, line in enumerate(address_file, start=1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+
+                if not array_started:
+                    if _STREAMING_ARRAY_START.fullmatch(stripped) is None:
+                        raise ValueError(
+                            f"Large address file must begin with 'addresses = [' on its own "
+                            f"line: {filepath}:{line_number}"
+                        )
+                    array_started = True
+                    continue
+
+                if array_closed:
+                    raise ValueError(
+                        f"Unexpected content after addresses array: {filepath}:{line_number}"
+                    )
+
+                if stripped == "]":
+                    array_closed = True
+                    continue
+
+                match = _STREAMING_ADDRESS.fullmatch(stripped)
+                if match is None:
+                    raise ValueError(
+                        "Large address files require one canonical Ethereum address per line, "
+                        f"followed by a comma: {filepath}:{line_number}"
+                    )
+                address_count += 1
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Address file not found: {filepath}") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Address file is not valid UTF-8: {filepath}") from exc
+    except OSError as exc:
+        raise OSError(f"Error reading address file {filepath}: {exc}") from exc
+
+    if not array_started or not array_closed or address_count == 0:
+        raise ValueError(f"Address file must define a non-empty 'addresses' array: {filepath}")
+
+
+def _iter_streaming_toml_addresses(filepath: Path) -> Iterator[str]:
+    """Read a validated canonical TOML address array with bounded memory."""
+    _validate_streaming_toml_layout(filepath)
+    try:
+        with filepath.open("r", encoding="utf-8-sig", newline="") as address_file:
+            for line in address_file:
+                match = _STREAMING_ADDRESS.fullmatch(line.strip())
+                if match is not None:
+                    yield match.group("address")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Address file is not valid UTF-8: {filepath}") from exc
+    except OSError as exc:
+        raise OSError(f"Error reading address file {filepath}: {exc}") from exc
+
+
+def _iter_addresses_from_file(filepath: Path) -> Iterator[str]:
+    try:
+        file_size = filepath.stat().st_size
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Address file not found: {filepath}") from exc
+    except OSError as exc:
+        raise OSError(f"Error reading address file {filepath}: {exc}") from exc
+
+    if file_size > MAX_IN_MEMORY_ADDRESS_FILE_BYTES:
+        yield from _iter_streaming_toml_addresses(filepath)
+        return
+
+    yield from _validated_toml_addresses(filepath)
+
+
+def _monitor_add_result_count(result: dict[str, Any], count_key: str, list_key: str) -> int:
+    count = result.get(count_key)
+    if type(count) is int and count >= 0:
+        return count
+
+    addresses = result.get(list_key)
+    if isinstance(addresses, list):
+        return len(addresses)
+    raise RPCProtocolError(f"monitor_add result is missing {count_key!r}")
 
 
 class RPCError(Exception):
@@ -459,23 +575,84 @@ class RPCClient:
             IOError: If there's an error reading the file
             ValueError: If the TOML is invalid or ``addresses`` is absent/invalid
         """
+        address_path = Path(filepath)
         try:
-            with Path(filepath).open("rb") as address_file:
-                document = tomllib.load(address_file)
+            file_size = address_path.stat().st_size
         except FileNotFoundError as exc:
             raise FileNotFoundError(f"Address file not found: {filepath}") from exc
-        except tomllib.TOMLDecodeError as exc:
-            raise ValueError(f"Invalid TOML in address file {filepath}: {exc}") from exc
         except OSError as exc:
             raise OSError(f"Error reading address file {filepath}: {exc}") from exc
+        if file_size > MAX_IN_MEMORY_ADDRESS_FILE_BYTES:
+            raise ValueError(
+                "Address file exceeds the in-memory loader limit; use "
+                "load_addresses_from_file_batched()"
+            )
 
-        addresses = document.get("addresses")
-        if not isinstance(addresses, list) or not addresses:
-            raise ValueError(f"Address file must define a non-empty 'addresses' array: {filepath}")
-        if any(not isinstance(address, str) or not address.strip() for address in addresses):
-            raise ValueError(f"All entries in 'addresses' must be non-empty strings: {filepath}")
-
+        addresses = _validated_toml_addresses(address_path)
         return self.monitor_add(addresses)
+
+    def load_addresses_from_file_batched(
+        self,
+        filepath: str | Path,
+        batch_size: int = DEFAULT_ADDRESS_BATCH_SIZE,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, int]:
+        """Stream addresses from TOML and add them in bounded RPC batches.
+
+        Files larger than 1 MiB must use the canonical layout produced by
+        ``download_binance_addresses.py``: the array declaration and closing
+        bracket are on separate lines, with one Ethereum address per line.
+        Successful batches are durable in Redis, so an interrupted import can
+        be safely rerun.
+
+        Args:
+            filepath: TOML file containing a top-level ``addresses`` array
+            batch_size: Maximum number of addresses in each RPC request
+            progress: Optional callback receiving ``(completed_batches,
+                processed_addresses)`` after every successful batch
+
+        Returns:
+            Aggregate request, addition, existing, invalid, and batch counts
+        """
+        if type(batch_size) is not int or not 1 <= batch_size <= DEFAULT_ADDRESS_BATCH_SIZE:
+            raise ValueError(f"batch_size must be between 1 and {DEFAULT_ADDRESS_BATCH_SIZE}")
+
+        summary = {
+            "requested_count": 0,
+            "added_count": 0,
+            "already_present_count": 0,
+            "invalid_count": 0,
+            "batch_count": 0,
+        }
+
+        def submit_batch(addresses: list[str]) -> None:
+            result = self.monitor_add(addresses)
+            added_count = _monitor_add_result_count(result, "added_count", "added")
+            existing_count = _monitor_add_result_count(
+                result, "already_present_count", "already_present"
+            )
+            invalid_count = _monitor_add_result_count(result, "invalid_count", "invalid")
+            if added_count + existing_count + invalid_count != len(addresses):
+                raise RPCProtocolError("monitor_add result counts do not match the submitted batch")
+
+            summary["requested_count"] += len(addresses)
+            summary["added_count"] += added_count
+            summary["already_present_count"] += existing_count
+            summary["invalid_count"] += invalid_count
+            summary["batch_count"] += 1
+            if progress is not None:
+                progress(summary["batch_count"], summary["requested_count"])
+
+        batch: list[str] = []
+        for address in _iter_addresses_from_file(Path(filepath)):
+            batch.append(address)
+            if len(batch) == batch_size:
+                submit_batch(batch)
+                batch = []
+
+        if batch:
+            submit_batch(batch)
+        return summary
 
     def close(self) -> None:
         """Close the connection to the RPC server."""

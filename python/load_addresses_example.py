@@ -16,9 +16,9 @@ import sys
 from typing import Any
 
 if __package__:
-    from .rpc_client import RPCClient, RPCError
+    from .rpc_client import DEFAULT_ADDRESS_BATCH_SIZE, RPCClient, RPCError
 else:
-    from rpc_client import RPCClient, RPCError
+    from rpc_client import DEFAULT_ADDRESS_BATCH_SIZE, RPCClient, RPCError
 
 
 def _extract_count(count_result: Any) -> int:
@@ -49,6 +49,7 @@ def load_and_monitor_addresses(
     host: str = "127.0.0.1",
     port: int = 8080,
     auth_token: str | None = None,
+    batch_size: int = DEFAULT_ADDRESS_BATCH_SIZE,
 ) -> bool:
     """
     Load addresses from a file and add them to the monitoring set.
@@ -58,6 +59,7 @@ def load_and_monitor_addresses(
         host: RPC server host
         port: RPC server port
         auth_token: Authentication token
+        batch_size: Maximum addresses sent in each RPC request
 
     Returns:
         True if successful, False otherwise
@@ -83,19 +85,27 @@ def load_and_monitor_addresses(
 
             # Load addresses from file
             print(f"\nLoading addresses from: {filepath}")
-            result = client.load_addresses_from_file(filepath)
+
+            def report_progress(completed_batches: int, processed_addresses: int) -> None:
+                if completed_batches == 1 or completed_batches % 100 == 0:
+                    print(
+                        f"  Imported {processed_addresses:,} addresses "
+                        f"in {completed_batches:,} batches..."
+                    )
+
+            result = client.load_addresses_from_file_batched(
+                filepath,
+                batch_size=batch_size,
+                progress=report_progress,
+            )
 
             # Display results
             print("\nResults:")
-            if "added" in result:
-                print(f"  Added: {len(result.get('added', []))} addresses")
-            if "already_present" in result:
-                print(f"  Already present: {len(result.get('already_present', []))} addresses")
-            if "invalid" in result:
-                invalid = result.get("invalid", [])
-                if invalid:
-                    print(f"  Invalid: {len(invalid)} addresses")
-                    print(f"    {invalid}")
+            print(f"  Requested: {result['requested_count']:,} addresses")
+            print(f"  Added: {result['added_count']:,} addresses")
+            print(f"  Already present: {result['already_present_count']:,} addresses")
+            print(f"  Invalid: {result['invalid_count']:,} addresses")
+            print(f"  Batches: {result['batch_count']:,}")
 
             # Get count after loading
             count_after_result = client.monitor_count()
@@ -129,9 +139,21 @@ def main() -> None:
     parser.add_argument("host", nargs="?", default="127.0.0.1", help="RPC server host")
     parser.add_argument("port", nargs="?", type=int, default=8080, help="RPC server port")
     parser.add_argument("auth_token", nargs="?", help="RPC authentication token")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_ADDRESS_BATCH_SIZE,
+        help=f"addresses per RPC request (maximum: {DEFAULT_ADDRESS_BATCH_SIZE})",
+    )
     args = parser.parse_args()
 
-    success = load_and_monitor_addresses(args.filepath, args.host, args.port, args.auth_token)
+    success = load_and_monitor_addresses(
+        args.filepath,
+        args.host,
+        args.port,
+        args.auth_token,
+        args.batch_size,
+    )
     sys.exit(0 if success else 1)
 
 

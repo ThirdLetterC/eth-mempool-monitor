@@ -178,6 +178,112 @@ class RPCClientTests(unittest.TestCase):
 
         self.assertEqual(stub.sent, [])
 
+    def test_load_addresses_rejects_large_file_with_batched_hint(self) -> None:
+        client = self.create_client(StubSocket())
+
+        with tempfile.TemporaryDirectory() as directory:
+            address_file = Path(directory, "addresses.toml")
+            address_file.write_text('addresses = ["0x1"]\n', encoding="utf-8")
+            with (
+                patch("python.rpc_client.MAX_IN_MEMORY_ADDRESS_FILE_BYTES", 1),
+                self.assertRaisesRegex(ValueError, "load_addresses_from_file_batched"),
+            ):
+                client.load_addresses_from_file(address_file)
+
+    def test_load_addresses_batched_streams_large_canonical_toml(self) -> None:
+        addresses = [f"0x{index:040x}" for index in range(5)]
+        stub = StubSocket(
+            response(
+                1,
+                result={
+                    "added_count": 2,
+                    "already_present_count": 0,
+                    "invalid_count": 0,
+                },
+            ),
+            response(
+                2,
+                result={
+                    "added_count": 1,
+                    "already_present_count": 1,
+                    "invalid_count": 0,
+                },
+            ),
+            response(
+                3,
+                result={
+                    "added_count": 0,
+                    "already_present_count": 1,
+                    "invalid_count": 0,
+                },
+            ),
+        )
+        client = self.create_client(stub)
+        progress: list[tuple[int, int]] = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            address_file = Path(directory, "addresses.toml")
+            address_file.write_text(
+                "# Generated address file\naddresses = [\n"
+                + "".join(f'    "{address}",\n' for address in addresses)
+                + "]\n",
+                encoding="utf-8",
+            )
+            with patch("python.rpc_client.MAX_IN_MEMORY_ADDRESS_FILE_BYTES", 1):
+                result = client.load_addresses_from_file_batched(
+                    address_file,
+                    batch_size=2,
+                    progress=lambda batches, processed: progress.append((batches, processed)),
+                )
+
+        requests = [json.loads(request) for request in stub.sent]
+        self.assertEqual(
+            [request["params"]["addresses"] for request in requests],
+            [addresses[:2], addresses[2:4], addresses[4:]],
+        )
+        self.assertEqual(
+            result,
+            {
+                "requested_count": 5,
+                "added_count": 3,
+                "already_present_count": 2,
+                "invalid_count": 0,
+                "batch_count": 3,
+            },
+        )
+        self.assertEqual(progress, [(1, 2), (2, 4), (3, 5)])
+
+    def test_load_addresses_batched_rejects_noncanonical_large_toml(self) -> None:
+        stub = StubSocket()
+        client = self.create_client(stub)
+
+        with tempfile.TemporaryDirectory() as directory:
+            address_file = Path(directory, "addresses.toml")
+            invalid_documents = [
+                'addresses = ["0x1"]\n',
+                'addresses = [\n"0x0000000000000000000000000000000000000001",\n',
+            ]
+            for document in invalid_documents:
+                with self.subTest(document=document):
+                    address_file.write_text(document, encoding="utf-8")
+                    with (
+                        patch("python.rpc_client.MAX_IN_MEMORY_ADDRESS_FILE_BYTES", 1),
+                        self.assertRaises(ValueError),
+                    ):
+                        client.load_addresses_from_file_batched(address_file)
+
+        self.assertEqual(stub.sent, [])
+
+    def test_load_addresses_batched_rejects_unsafe_batch_size(self) -> None:
+        client = self.create_client(StubSocket())
+
+        for batch_size in (0, 1_001):
+            with (
+                self.subTest(batch_size=batch_size),
+                self.assertRaisesRegex(ValueError, "batch_size"),
+            ):
+                client.load_addresses_from_file_batched("unused.toml", batch_size=batch_size)
+
     def test_constructor_rejects_invalid_limits(self) -> None:
         with self.assertRaises(ValueError):
             RPCClient(host="")
