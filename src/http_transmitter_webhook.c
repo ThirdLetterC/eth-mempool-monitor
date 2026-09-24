@@ -98,6 +98,31 @@ http_validate_json_payload(const void *body, size_t body_length) {
   return current * 2U;
 }
 
+[[nodiscard]] static bool http_append_header(http_webhook_client_t *client,
+                                             const char *header) {
+  struct curl_slist *headers = curl_slist_append(client->headers, header);
+  if (headers == nullptr) {
+    return false;
+  }
+  client->headers = headers;
+  return true;
+}
+
+[[nodiscard]] static const char *
+http_content_encoding_header(http_compression_t compression) {
+  switch (compression) {
+  case HTTP_COMPRESSION_NONE:
+    return nullptr;
+  case HTTP_COMPRESSION_GZIP:
+    return "Content-Encoding: gzip";
+  case HTTP_COMPRESSION_BROTLI:
+    return "Content-Encoding: br";
+  case HTTP_COMPRESSION_ZSTD:
+    return "Content-Encoding: zstd";
+  }
+  return nullptr;
+}
+
 [[nodiscard]] http_transmitter_status_t
 http_webhook_client_init(http_webhook_client_t *client,
                          const http_transmitter_config_t *config) {
@@ -117,9 +142,19 @@ http_webhook_client_init(http_webhook_client_t *client,
     curl_global_cleanup();
     return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
   }
-  client->headers =
-      curl_slist_append(client->headers, "Content-Type: application/json");
-  if (client->headers == nullptr) {
+  if (!http_append_header(client, "Content-Type: application/json")) {
+    http_webhook_client_cleanup(client);
+    return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
+  }
+  const char *encoding_header =
+      http_content_encoding_header(config->compression);
+  if (config->compression != HTTP_COMPRESSION_NONE &&
+      encoding_header == nullptr) {
+    http_webhook_client_cleanup(client);
+    return HTTP_TRANSMITTER_STATUS_INVALID_CONFIG;
+  }
+  if (encoding_header != nullptr &&
+      !http_append_header(client, encoding_header)) {
     http_webhook_client_cleanup(client);
     return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
   }
@@ -180,22 +215,9 @@ http_webhook_configure_request(http_webhook_client_t *client, const void *body,
   return CURLE_OK;
 }
 
-[[nodiscard]] http_delivery_result_t
-http_webhook_deliver(http_webhook_client_t *client, const void *body,
-                     size_t body_length) {
-  if (client == nullptr || client->easy == nullptr ||
-      client->config == nullptr) {
-    return HTTP_DELIVERY_TRANSIENT_FAILURE;
-  }
-  http_payload_validation_t validation =
-      http_validate_json_payload(body, body_length);
-  if (validation == HTTP_PAYLOAD_INVALID) {
-    return HTTP_DELIVERY_PERMANENT_FAILURE;
-  }
-  if (validation == HTTP_PAYLOAD_VALIDATION_ERROR) {
-    return HTTP_DELIVERY_TRANSIENT_FAILURE;
-  }
-
+[[nodiscard]] static http_delivery_result_t
+http_webhook_deliver_prepared(http_webhook_client_t *client, const void *body,
+                              size_t body_length) {
   uint32_t backoff = client->config->initial_backoff.value;
   for (uint32_t attempt = 1; attempt <= client->config->max_attempts;
        ++attempt) {
@@ -234,4 +256,39 @@ http_webhook_deliver(http_webhook_client_t *client, const void *body,
     }
   }
   return HTTP_DELIVERY_TRANSIENT_FAILURE;
+}
+
+[[nodiscard]] http_delivery_result_t
+http_webhook_deliver(http_webhook_client_t *client, const void *body,
+                     size_t body_length) {
+  if (client == nullptr || client->easy == nullptr ||
+      client->config == nullptr) {
+    return HTTP_DELIVERY_TRANSIENT_FAILURE;
+  }
+  http_payload_validation_t validation =
+      http_validate_json_payload(body, body_length);
+  if (validation == HTTP_PAYLOAD_INVALID) {
+    return HTTP_DELIVERY_PERMANENT_FAILURE;
+  }
+  if (validation == HTTP_PAYLOAD_VALIDATION_ERROR) {
+    return HTTP_DELIVERY_TRANSIENT_FAILURE;
+  }
+
+  const void *request_body = body;
+  size_t request_length = body_length;
+  http_compressed_payload_t compressed = {0};
+  if (client->config->compression != HTTP_COMPRESSION_NONE) {
+    http_transmitter_status_t status = http_transmitter_compress_payload(
+        client->config->compression, body, body_length, &compressed);
+    if (status != HTTP_TRANSMITTER_STATUS_OK) {
+      return HTTP_DELIVERY_TRANSIENT_FAILURE;
+    }
+    request_body = compressed.data;
+    request_length = compressed.length;
+  }
+
+  http_delivery_result_t result =
+      http_webhook_deliver_prepared(client, request_body, request_length);
+  http_transmitter_compressed_payload_cleanup(&compressed);
+  return result;
 }

@@ -100,6 +100,7 @@ void http_transmitter_config_set_defaults(http_transmitter_config_t *config) {
       .initial_backoff = {.value = HTTP_DEFAULT_INITIAL_BACKOFF_MS},
       .max_backoff = {.value = HTTP_DEFAULT_MAX_BACKOFF_MS},
       .parallel_requests = {.value = HTTP_DEFAULT_PARALLEL_REQUESTS},
+      .compression = HTTP_COMPRESSION_NONE,
       .log_level = HTTP_DEFAULT_LOG_LEVEL,
       .log_color = HTTP_DEFAULT_LOG_COLOR,
   };
@@ -144,6 +145,7 @@ void http_transmitter_print_usage(const char *program_name) {
   printf("      --webhook-initial-backoff-ms <ms>\n");
   printf("      --webhook-max-backoff-ms <ms>\n");
   printf("      --webhook-parallel-requests <count>\n");
+  printf("      --webhook-compression <none|gzip|brotli|zstd>\n");
   printf("  -h, --help                          Show this help\n");
 }
 
@@ -193,6 +195,29 @@ void http_transmitter_print_usage(const char *program_name) {
   for (size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i) {
     if (strcasecmp(text, levels[i].name) == 0) {
       *out_level = levels[i].level;
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] static bool
+http_parse_compression(const char *text, http_compression_t *out_compression) {
+  if (text == nullptr || out_compression == nullptr) {
+    return false;
+  }
+  const struct {
+    const char *name;
+    http_compression_t compression;
+  } encodings[] = {
+      {"none", HTTP_COMPRESSION_NONE},
+      {"gzip", HTTP_COMPRESSION_GZIP},
+      {"brotli", HTTP_COMPRESSION_BROTLI},
+      {"zstd", HTTP_COMPRESSION_ZSTD},
+  };
+  for (size_t i = 0; i < sizeof(encodings) / sizeof(encodings[0]); ++i) {
+    if (strcasecmp(text, encodings[i].name) == 0) {
+      *out_compression = encodings[i].compression;
       return true;
     }
   }
@@ -298,6 +323,14 @@ http_load_toml_impl(http_transmitter_config_t *config,
   ok = ok && http_apply_toml_string(parsed.toptab, "webhook.bearer_token_env",
                                     &config->bearer_token_env,
                                     &config->bearer_token_env_owned, false);
+  toml_datum_t compression = toml_seek(parsed.toptab, "webhook.compression");
+  if (ok && compression.type != TOML_UNKNOWN &&
+      (compression.type != TOML_STRING ||
+       !http_parse_compression(compression.u.s, &config->compression))) {
+    ulog_error("Config key 'webhook.compression' must be one of: none, gzip, "
+               "brotli, zstd");
+    ok = false;
+  }
 
   uint32_t value = 0;
   if (ok && http_apply_toml_u32(parsed.toptab, "rabbitmq.port", 1, UINT16_MAX,
@@ -436,6 +469,7 @@ http_transmitter_parse_cli(int argc, char *argv[],
               overrides->initial_backoff_ms_text)
     CLI_VALUE("--webhook-max-backoff-ms", overrides->max_backoff_ms_text)
     CLI_VALUE("--webhook-parallel-requests", overrides->parallel_requests_text)
+    CLI_VALUE("--webhook-compression", overrides->compression)
 #undef CLI_VALUE
     if (strcmp(arg, "--rabbitmq-queue-durable") == 0 ||
         strcmp(arg, "--rabbitmq-queue-transient") == 0) {
@@ -529,6 +563,11 @@ http_transmitter_parse_cli(int argc, char *argv[],
                                 "--webhook-parallel-requests", 1,
                                 HTTP_MAX_PARALLEL_REQUESTS, &parallel_requests);
   config->parallel_requests.value = (uint16_t)parallel_requests;
+  if (ok && overrides->compression != nullptr &&
+      !http_parse_compression(overrides->compression, &config->compression)) {
+    ulog_error("Invalid --webhook-compression value");
+    ok = false;
+  }
   if (!ok) {
     return APP_CONFIG_STATUS_INVALID_VALUE;
   }
@@ -548,6 +587,10 @@ http_transmitter_finalize_config(http_transmitter_config_t *config) {
   if (strncmp(config->webhook_url, "http://", 7) != 0 &&
       strncmp(config->webhook_url, "https://", 8) != 0) {
     ulog_error("Webhook URL must use http:// or https://");
+    return APP_CONFIG_STATUS_INVALID_VALUE;
+  }
+  if (config->compression > HTTP_COMPRESSION_ZSTD) {
+    ulog_error("Webhook compression selection is invalid");
     return APP_CONFIG_STATUS_INVALID_VALUE;
   }
   if (config->initial_backoff.value > config->max_backoff.value) {

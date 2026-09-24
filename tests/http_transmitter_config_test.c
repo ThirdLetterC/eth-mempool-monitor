@@ -12,6 +12,7 @@ static void test_defaults_and_cli_precedence() {
   assert(config.max_attempts == 3);
   assert(config.connect_timeout.value == 5'000);
   assert(config.parallel_requests.value == 1);
+  assert(config.compression == HTTP_COMPRESSION_NONE);
 
   char program[] = "http_transmitter_config_test";
   char url_option[] = "--webhook-url";
@@ -22,9 +23,11 @@ static void test_defaults_and_cli_precedence() {
   char prefetch[] = "4";
   char parallel_option[] = "--webhook-parallel-requests";
   char parallel[] = "4";
-  char *argv[] = {program,         url_option,      url,
-                  attempts_option, attempts,        prefetch_option,
-                  prefetch,        parallel_option, parallel};
+  char compression_option[] = "--webhook-compression";
+  char compression[] = "zstd";
+  char *argv[] = {program,  url_option,         url,        attempts_option,
+                  attempts, prefetch_option,    prefetch,   parallel_option,
+                  parallel, compression_option, compression};
   http_transmitter_cli_overrides_t overrides = {0};
   assert(http_transmitter_parse_cli((int)(sizeof(argv) / sizeof(argv[0])), argv,
                                     &overrides) == APP_CONFIG_STATUS_OK);
@@ -34,6 +37,7 @@ static void test_defaults_and_cli_precedence() {
   assert(config.max_attempts == 7);
   assert(config.prefetch_count.value == 4);
   assert(config.parallel_requests.value == 4);
+  assert(config.compression == HTTP_COMPRESSION_ZSTD);
   assert(http_transmitter_finalize_config(&config) == APP_CONFIG_STATUS_OK);
   http_transmitter_config_cleanup(&config);
 }
@@ -68,7 +72,8 @@ static void test_parallel_requests_toml() {
                           "prefetch_count = 6\n"
                           "[webhook]\n"
                           "url = \"https://example.invalid/webhook\"\n"
-                          "parallel_requests = 6\n";
+                          "parallel_requests = 6\n"
+                          "compression = \"brotli\"\n";
   char path[] = "/tmp/http-transmitter-config-XXXXXX";
   int descriptor = mkstemp(path);
   assert(descriptor >= 0);
@@ -86,6 +91,7 @@ static void test_parallel_requests_toml() {
          APP_CONFIG_STATUS_OK);
   assert(config.prefetch_count.value == 6);
   assert(config.parallel_requests.value == 6);
+  assert(config.compression == HTTP_COMPRESSION_BROTLI);
   assert(http_transmitter_finalize_config(&config) == APP_CONFIG_STATUS_OK);
   http_transmitter_config_cleanup(&config);
   assert(unlink(path) == 0);

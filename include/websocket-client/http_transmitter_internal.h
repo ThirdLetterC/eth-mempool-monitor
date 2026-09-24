@@ -11,6 +11,19 @@
 
 static constexpr size_t HTTP_TRANSMITTER_MAX_PAYLOAD_BYTES = 1 * 1'024 * 1'024;
 
+typedef enum http_compression : uint8_t {
+  HTTP_COMPRESSION_NONE = 0,
+  HTTP_COMPRESSION_GZIP,
+  HTTP_COMPRESSION_BROTLI,
+  HTTP_COMPRESSION_ZSTD,
+} http_compression_t;
+
+typedef struct http_compressed_payload http_compressed_payload_t;
+struct http_compressed_payload {
+  unsigned char *data;
+  size_t length;
+};
+
 /*
  * Internal transmitter boundary.
  *
@@ -41,6 +54,7 @@ struct http_transmitter_config {
   app_milliseconds_t initial_backoff;
   app_milliseconds_t max_backoff;
   app_parallel_request_count_t parallel_requests;
+  http_compression_t compression;
   ulog_level log_level;
   bool log_color;
   char *rabbitmq_host_owned;
@@ -75,6 +89,7 @@ struct http_transmitter_cli_overrides {
   const char *initial_backoff_ms_text;
   const char *max_backoff_ms_text;
   const char *parallel_requests_text;
+  const char *compression;
   bool show_help;
 };
 
@@ -114,6 +129,7 @@ typedef enum http_delivery_result : uint8_t {
 
 static_assert(sizeof(http_transmitter_status_t) == sizeof(uint8_t));
 static_assert(sizeof(http_delivery_result_t) == sizeof(uint8_t));
+static_assert(sizeof(http_compression_t) == sizeof(uint8_t));
 
 extern volatile sig_atomic_t http_transmitter_shutdown_signal;
 
@@ -136,6 +152,14 @@ http_transmitter_finalize_config(http_transmitter_config_t *config);
 [[nodiscard]] bool http_transmitter_apply_log_level(ulog_level level);
 [[nodiscard]] bool http_transmitter_apply_log_color(bool enabled);
 [[nodiscard]] bool http_transmitter_apply_log_style_defaults();
+[[nodiscard]] const char *
+http_transmitter_compression_name(http_compression_t compression);
+[[nodiscard]] http_transmitter_status_t
+http_transmitter_compress_payload(http_compression_t compression,
+                                  const void *body, size_t body_length,
+                                  http_compressed_payload_t *payload);
+void http_transmitter_compressed_payload_cleanup(
+    http_compressed_payload_t *payload);
 
 [[nodiscard]] http_transmitter_status_t
 http_transmitter_rabbitmq_connect(const http_transmitter_config_t *config,

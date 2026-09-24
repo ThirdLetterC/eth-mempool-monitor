@@ -98,7 +98,10 @@ Dynamic storage is dominated by parsed JSON (`O(n)`), serialized events
 descriptors and is capped at 64 MiB of payload data.
 
 The HTTP transmitter copies at most `webhook.parallel_requests` payloads of up
-to 1 MiB each. Its worker and delivery-slot scans are `O(w)`, where `w <= 256`.
+to 1 MiB each. With request compression enabled, each active worker also owns
+one codec-bounded output buffer until delivery succeeds or exhausts its
+retries. Compression is `O(t)` in the payload size; worker and delivery-slot
+scans are `O(w)`, where `w <= 256`.
 
 The RPC server accepts at most 256 concurrent clients. Each client may queue at
 most 64 writes or 512 KiB of response data before the connection is closed.
@@ -110,6 +113,9 @@ parsing them.
 - [Zig](https://ziglang.org/) for the build system
 - [wolfSSL](https://www.wolfssl.com/)
 - [libuv](https://libuv.org/)
+- [zlib](https://zlib.net/), [Brotli](https://github.com/google/brotli), and
+  [Zstandard](https://facebook.github.io/zstd/) for optional webhook request
+  compression
 - [mimalloc](https://microsoft.github.io/mimalloc/), optionally
 - [Redis](https://redis.io/) or [Valkey](https://valkey.io/)
 - [RabbitMQ](https://www.rabbitmq.com/)

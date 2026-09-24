@@ -63,6 +63,79 @@ const rabbitmq_files = [_][]const u8{
     "src/rabbitmq/amqp_url.c",
 };
 
+const zlib_files = [_][]const u8{
+    "adler32.c", "compress.c", "crc32.c",   "deflate.c", "inflate.c",
+    "infback.c", "inftrees.c", "inffast.c", "trees.c",   "uncompr.c",
+    "zutil.c",
+};
+
+const brotli_files = [_][]const u8{
+    "c/common/constants.c",
+    "c/common/context.c",
+    "c/common/dictionary.c",
+    "c/common/platform.c",
+    "c/common/shared_dictionary.c",
+    "c/common/transform.c",
+    "c/dec/bit_reader.c",
+    "c/dec/decode.c",
+    "c/dec/huffman.c",
+    "c/dec/prefix.c",
+    "c/dec/state.c",
+    "c/dec/static_init.c",
+    "c/enc/backward_references.c",
+    "c/enc/backward_references_hq.c",
+    "c/enc/bit_cost.c",
+    "c/enc/block_splitter.c",
+    "c/enc/brotli_bit_stream.c",
+    "c/enc/cluster.c",
+    "c/enc/command.c",
+    "c/enc/compound_dictionary.c",
+    "c/enc/compress_fragment.c",
+    "c/enc/compress_fragment_two_pass.c",
+    "c/enc/dictionary_hash.c",
+    "c/enc/encode.c",
+    "c/enc/encoder_dict.c",
+    "c/enc/entropy_encode.c",
+    "c/enc/fast_log.c",
+    "c/enc/histogram.c",
+    "c/enc/literal_cost.c",
+    "c/enc/memory.c",
+    "c/enc/metablock.c",
+    "c/enc/static_dict.c",
+    "c/enc/static_dict_lut.c",
+    "c/enc/static_init.c",
+    "c/enc/utf8_util.c",
+};
+
+const zstd_files = [_][]const u8{
+    "lib/common/debug.c",
+    "lib/common/entropy_common.c",
+    "lib/common/error_private.c",
+    "lib/common/fse_decompress.c",
+    "lib/common/pool.c",
+    "lib/common/threading.c",
+    "lib/common/xxhash.c",
+    "lib/common/zstd_common.c",
+    "lib/compress/fse_compress.c",
+    "lib/compress/hist.c",
+    "lib/compress/huf_compress.c",
+    "lib/compress/zstd_compress.c",
+    "lib/compress/zstd_compress_literals.c",
+    "lib/compress/zstd_compress_sequences.c",
+    "lib/compress/zstd_compress_superblock.c",
+    "lib/compress/zstd_double_fast.c",
+    "lib/compress/zstd_fast.c",
+    "lib/compress/zstd_lazy.c",
+    "lib/compress/zstd_ldm.c",
+    "lib/compress/zstd_opt.c",
+    "lib/compress/zstd_preSplit.c",
+    "lib/compress/zstdmt_compress.c",
+    "lib/decompress/huf_decompress.c",
+    "lib/decompress/zstd_ddict.c",
+    "lib/decompress/zstd_decompress.c",
+    "lib/decompress/zstd_decompress_block.c",
+};
+
 const curl_files = [_][]const u8{
     "altsvc.c",
     "amigaos.c",
@@ -517,6 +590,33 @@ fn createWolfSslLibrary(
     });
 }
 
+fn createCodecLibrary(
+    b: *std.Build,
+    dependency: *std.Build.Dependency,
+    name: []const u8,
+    files: []const []const u8,
+    include_path: []const u8,
+    flags: []const []const u8,
+    target: std.Build.ResolvedTarget,
+) *std.Build.Step.Compile {
+    const module = b.createModule(.{
+        .target = target,
+        .optimize = .ReleaseFast,
+        .link_libc = true,
+    });
+    module.addIncludePath(dependency.path(include_path));
+    module.addCSourceFiles(.{
+        .root = dependency.path("."),
+        .files = files,
+        .flags = flags,
+    });
+    return b.addLibrary(.{
+        .name = name,
+        .linkage = .static,
+        .root_module = module,
+    });
+}
+
 fn addCFiles(
     b: *std.Build,
     module: *std.Build.Module,
@@ -633,6 +733,36 @@ pub fn build(b: *std.Build) void {
     const libuv_library = createLibuvLibrary(b, libuv_dependency, target, .ReleaseFast);
     const wolfssl_library = createWolfSslLibrary(b, wolfssl_dependency, target, .ReleaseFast);
     const curl_dependency = b.dependency("curl", .{});
+    const zlib_dependency = b.dependency("zlib", .{});
+    const brotli_dependency = b.dependency("brotli", .{});
+    const zstd_dependency = b.dependency("zstd", .{});
+    const zlib_library = createCodecLibrary(
+        b,
+        zlib_dependency,
+        "z",
+        &zlib_files,
+        ".",
+        &.{"-std=c23"},
+        target,
+    );
+    const brotli_library = createCodecLibrary(
+        b,
+        brotli_dependency,
+        "brotli",
+        &brotli_files,
+        "c/include",
+        &.{ "-std=c23", "-DBROTLI_BUILD_PORTABLE" },
+        target,
+    );
+    const zstd_library = createCodecLibrary(
+        b,
+        zstd_dependency,
+        "zstd",
+        &zstd_files,
+        "lib",
+        &.{ "-std=c23", "-DXXH_NAMESPACE=ZSTD_", "-DZSTD_DISABLE_ASM" },
+        target,
+    );
     const curl_library = createCurlLibrary(
         b,
         curl_dependency,
@@ -822,12 +952,19 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, http_webhook_test_module, &.{"src/parson.c"}, c_flags);
     addCFiles(b, http_webhook_test_module, &.{
         "tests/http_transmitter_webhook_test.c",
+        "src/http_transmitter_compression.c",
         "src/http_transmitter_webhook.c",
     }, project_posix_c_flags);
     addCFiles(b, http_webhook_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     http_webhook_test_module.addIncludePath(curl_dependency.path("include"));
+    http_webhook_test_module.addIncludePath(zlib_dependency.path("."));
+    http_webhook_test_module.addIncludePath(brotli_dependency.path("c/include"));
+    http_webhook_test_module.addIncludePath(zstd_dependency.path("lib"));
     http_webhook_test_module.linkLibrary(curl_library);
     http_webhook_test_module.linkLibrary(wolfssl_library);
+    http_webhook_test_module.linkLibrary(zlib_library);
+    http_webhook_test_module.linkLibrary(brotli_library);
+    http_webhook_test_module.linkLibrary(zstd_library);
     const http_webhook_test = b.addExecutable(.{
         .name = "http_transmitter_webhook_test",
         .root_module = http_webhook_test_module,
@@ -933,6 +1070,7 @@ pub fn build(b: *std.Build) void {
     }, c_flags);
     addCFiles(b, http_transmitter_module, &.{
         "src/http_transmitter.c",
+        "src/http_transmitter_compression.c",
         "src/http_transmitter_config.c",
         "src/http_transmitter_consumer.c",
         "src/http_transmitter_webhook.c",
@@ -943,8 +1081,14 @@ pub fn build(b: *std.Build) void {
         http_transmitter_module.addIncludePath(dependency.path("include"));
     }
     http_transmitter_module.addIncludePath(curl_dependency.path("include"));
+    http_transmitter_module.addIncludePath(zlib_dependency.path("."));
+    http_transmitter_module.addIncludePath(brotli_dependency.path("c/include"));
+    http_transmitter_module.addIncludePath(zstd_dependency.path("lib"));
     http_transmitter_module.linkLibrary(curl_library);
     http_transmitter_module.linkLibrary(wolfssl_library);
+    http_transmitter_module.linkLibrary(zlib_library);
+    http_transmitter_module.linkLibrary(brotli_library);
+    http_transmitter_module.linkLibrary(zstd_library);
     linkOptionalLibrary(http_transmitter_module, mimalloc_library);
 
     const http_transmitter = addExecutable(

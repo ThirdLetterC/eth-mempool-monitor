@@ -127,6 +127,12 @@ Set `webhook.parallel_requests` to the desired concurrency. Keep
 example, a parallel request count of `8` permits eight simultaneous HTTP
 requests while keeping RabbitMQ acknowledgements serialized.
 
+Set `webhook.compression` to `gzip`, `brotli`, or `zstd` to compress JSON
+request bodies. The default is `none`. The receiver must decode the matching
+`Content-Encoding` value (`gzip`, `br`, or `zstd`). Compression is performed
+independently by each delivery worker before its first attempt, and retries
+reuse the encoded payload.
+
 Do not run the console and transmitter against the same queue when both must
 receive every event: RabbitMQ distributes queue deliveries among consumers.
 Use a separately bound queue for fan-out.

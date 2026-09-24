@@ -1,6 +1,7 @@
 #include "websocket-client/http_transmitter_internal.h"
 
 #include <assert.h>
+#include <brotli/decode.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
@@ -10,6 +11,8 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <zlib.h>
+#include <zstd.h>
 
 volatile sig_atomic_t http_transmitter_shutdown_signal = 0;
 
@@ -52,7 +55,8 @@ struct test_parallel_delivery_context {
 static void test_server_child(int server, uint32_t request_count,
                               const char *status_line,
                               const char *expected_body,
-                              bool expect_authorization) {
+                              bool expect_authorization,
+                              const char *expected_encoding) {
   for (uint32_t request = 0; request < request_count; ++request) {
     int client = accept(server, nullptr, nullptr);
     if (client < 0) {
@@ -60,8 +64,9 @@ static void test_server_child(int server, uint32_t request_count,
     }
     char buffer[8'192] = {0};
     size_t used = 0;
-    while (used + 1 < sizeof(buffer) &&
-           strstr(buffer, expected_body) == nullptr) {
+    char *body = nullptr;
+    size_t content_length = 0;
+    while (used + 1 < sizeof(buffer)) {
       ssize_t received =
           recv(client, buffer + used, sizeof(buffer) - used - 1, 0);
       if (received <= 0) {
@@ -70,9 +75,26 @@ static void test_server_child(int server, uint32_t request_count,
       }
       used += (size_t)received;
       buffer[used] = '\0';
+      if (body == nullptr) {
+        char *separator = strstr(buffer, "\r\n\r\n");
+        char *length_header = strstr(buffer, "Content-Length: ");
+        if (separator != nullptr && length_header != nullptr) {
+          body = separator + 4;
+          content_length = strtoul(length_header + 16, nullptr, 10);
+        }
+      }
+      if (body != nullptr && used >= (size_t)(body - buffer) + content_length) {
+        break;
+      }
     }
     bool valid = strstr(buffer, "Content-Type: application/json") != nullptr &&
-                 strstr(buffer, expected_body) != nullptr;
+                 body != nullptr && content_length > 0;
+    if (expected_encoding == nullptr) {
+      valid = valid && strstr(buffer, "Content-Encoding:") == nullptr &&
+              strstr(body, expected_body) != nullptr;
+    } else {
+      valid = valid && strstr(buffer, expected_encoding) != nullptr;
+    }
     if (expect_authorization) {
       valid = valid &&
               strstr(buffer, "Authorization: Bearer test-secret") != nullptr;
@@ -95,14 +117,16 @@ static void test_server_child(int server, uint32_t request_count,
 
 [[nodiscard]] static http_delivery_result_t
 test_delivery(uint32_t request_count, const char *status_line,
-              uint32_t attempts, bool bearer) {
+              uint32_t attempts, bool bearer, http_compression_t compression,
+              const char *expected_encoding) {
   constexpr char BODY[] = "{\"hash\":\"0x1234\"}";
   int server = -1;
   uint16_t port = test_open_server(&server);
   pid_t child = fork();
   assert(child >= 0);
   if (child == 0) {
-    test_server_child(server, request_count, status_line, BODY, bearer);
+    test_server_child(server, request_count, status_line, BODY, bearer,
+                      expected_encoding);
   }
 
   char url[128] = {0};
@@ -117,6 +141,7 @@ test_delivery(uint32_t request_count, const char *status_line,
       .max_attempts = attempts,
       .initial_backoff = {.value = 1},
       .max_backoff = {.value = 2},
+      .compression = compression,
   };
   http_webhook_client_t client = {0};
   assert(http_webhook_client_init(&client, &config) ==
@@ -142,7 +167,7 @@ static void test_parallel_delivery() {
   assert(child >= 0);
   if (child == 0) {
     test_server_child(server, (uint32_t)WORKER_COUNT, "204 No Content", BODY,
-                      false);
+                      false, nullptr);
   }
 
   char url[128] = {0};
@@ -186,12 +211,58 @@ static void test_parallel_delivery() {
   assert(WEXITSTATUS(child_status) == EXIT_SUCCESS);
 }
 
+static void test_compression_round_trip(http_compression_t compression) {
+  constexpr char BODY[] =
+      "{\"hash\":\"0x1234\",\"repeated\":\"aaaaaaaaaaaaaaaaaaaaaaaa\"}";
+  http_compressed_payload_t payload = {0};
+  assert(http_transmitter_compress_payload(compression, BODY, sizeof(BODY) - 1,
+                                           &payload) ==
+         HTTP_TRANSMITTER_STATUS_OK);
+  assert(payload.data != nullptr);
+  assert(payload.length > 0);
+
+  unsigned char decoded[sizeof(BODY)] = {0};
+  size_t decoded_length = sizeof(decoded);
+  if (compression == HTTP_COMPRESSION_GZIP) {
+    z_stream stream = {
+        .next_in = payload.data,
+        .avail_in = (uInt)payload.length,
+        .next_out = decoded,
+        .avail_out = (uInt)decoded_length,
+    };
+    assert(inflateInit2(&stream, MAX_WBITS + 16) == Z_OK);
+    assert(inflate(&stream, Z_FINISH) == Z_STREAM_END);
+    decoded_length = (size_t)stream.total_out;
+    assert(inflateEnd(&stream) == Z_OK);
+  } else if (compression == HTTP_COMPRESSION_BROTLI) {
+    assert(BrotliDecoderDecompress(payload.length, payload.data,
+                                   &decoded_length,
+                                   decoded) == BROTLI_DECODER_RESULT_SUCCESS);
+  } else {
+    decoded_length =
+        ZSTD_decompress(decoded, decoded_length, payload.data, payload.length);
+    assert(ZSTD_isError(decoded_length) == 0);
+  }
+  assert(decoded_length == sizeof(BODY) - 1);
+  assert(memcmp(decoded, BODY, decoded_length) == 0);
+  http_transmitter_compressed_payload_cleanup(&payload);
+}
+
 int main() {
-  assert(test_delivery(1, "204 No Content", 1, true) == HTTP_DELIVERY_SUCCESS);
-  assert(test_delivery(3, "503 Service Unavailable", 3, false) ==
-         HTTP_DELIVERY_TRANSIENT_FAILURE);
-  assert(test_delivery(1, "302 Found", 1, false) ==
-         HTTP_DELIVERY_TRANSIENT_FAILURE);
+  assert(test_delivery(1, "204 No Content", 1, true, HTTP_COMPRESSION_GZIP,
+                       "Content-Encoding: gzip") == HTTP_DELIVERY_SUCCESS);
+  assert(test_delivery(1, "204 No Content", 1, false, HTTP_COMPRESSION_BROTLI,
+                       "Content-Encoding: br") == HTTP_DELIVERY_SUCCESS);
+  assert(test_delivery(1, "204 No Content", 1, false, HTTP_COMPRESSION_ZSTD,
+                       "Content-Encoding: zstd") == HTTP_DELIVERY_SUCCESS);
+  assert(test_delivery(3, "503 Service Unavailable", 3, false,
+                       HTTP_COMPRESSION_NONE,
+                       nullptr) == HTTP_DELIVERY_TRANSIENT_FAILURE);
+  assert(test_delivery(1, "302 Found", 1, false, HTTP_COMPRESSION_NONE,
+                       nullptr) == HTTP_DELIVERY_TRANSIENT_FAILURE);
+  test_compression_round_trip(HTTP_COMPRESSION_GZIP);
+  test_compression_round_trip(HTTP_COMPRESSION_BROTLI);
+  test_compression_round_trip(HTTP_COMPRESSION_ZSTD);
   test_parallel_delivery();
 
   http_transmitter_config_t config = {

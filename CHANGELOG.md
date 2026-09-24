@@ -19,6 +19,9 @@ are summarized from the commits contained in each tagged release.
   tests.
 - Added bounded parallel webhook delivery and progress statistics reporting
   total, sent, remaining, in-flight, rejected, and requeued transactions.
+- Added configurable gzip, Brotli, and Zstandard webhook request compression,
+  with pinned source-built static codec libraries and matching
+  `Content-Encoding` headers.
 
 ### Changed
 

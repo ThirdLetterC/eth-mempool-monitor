@@ -70,15 +70,19 @@ Webhook keys:
 - `webhook.max_backoff_ms`
 - `webhook.parallel_requests` (default `1`, maximum `256`; must not exceed
   `rabbitmq_consumer.prefetch_count`)
+- `webhook.compression` (`none` by default; `gzip`, `brotli`, or `zstd`)
 
 Webhook settings can be overridden with `--webhook-url`,
 `--webhook-bearer-token-env`, `--webhook-connect-timeout-ms`,
 `--webhook-timeout-ms`, `--webhook-max-attempts`,
 `--webhook-initial-backoff-ms`, `--webhook-max-backoff-ms`, and
-`--webhook-parallel-requests`.
+`--webhook-parallel-requests`, and `--webhook-compression`.
 
-The complete RabbitMQ message is sent unchanged with
-`Content-Type: application/json`. HTTP 2xx responses are acknowledged.
+The complete RabbitMQ message is sent with `Content-Type: application/json`.
+When compression is enabled, the request body is compressed once per delivery
+and libcurl sends the matching `Content-Encoding: gzip`, `br`, or `zstd`
+header. Retries reuse the same encoded bytes. The webhook receiver must support
+the selected content encoding. HTTP 2xx responses are acknowledged.
 Transport errors and non-2xx responses are retried and then requeued; malformed
 or oversized messages are rejected without requeue. Webhook receivers must be
 idempotent because an acknowledgement failure can cause duplicate delivery.

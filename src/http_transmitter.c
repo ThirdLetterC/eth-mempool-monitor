@@ -91,9 +91,10 @@ int main(int argc, char *argv[]) {
   }
 
   ulog_info("Starting HTTP transaction transmitter");
-  ulog_info("Webhook delivery: parallel=%u attempts=%u connect_timeout=%u ms "
-            "timeout=%u ms",
+  ulog_info("Webhook delivery: parallel=%u attempts=%u compression=%s "
+            "connect_timeout=%u ms timeout=%u ms",
             (unsigned)config.parallel_requests.value, config.max_attempts,
+            http_transmitter_compression_name(config.compression),
             config.connect_timeout.value, config.request_timeout.value);
   bool ok = http_transmitter_consume_loop(&consumer, &config) ==
             HTTP_TRANSMITTER_STATUS_OK;

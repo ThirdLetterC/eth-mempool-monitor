@@ -21,6 +21,18 @@
             .url = "git+https://github.com/wolfSSL/wolfssl.git#ac01707f552c611fbd135cc723b2682b3e7f80f2",
             .hash = "N-V-__8AAPhMWQf0AfQZBj09a8GS8HmcI1gcIMKqC5PmBx6a",
         },
+        .zlib = .{
+            .url = "git+https://github.com/madler/zlib.git?ref=v1.3.2#da607da739fa6047df13e66a2af6b8bec7c2a498",
+            .hash = "N-V-__8AAI4ANwDM8MWhHTUFLKfvLE_n2NQk6mh0sFDzhTqO",
+        },
+        .brotli = .{
+            .url = "git+https://github.com/google/brotli.git?ref=v1.2.0#028fb5a23661f123017c060daa546b55cf4bde29",
+            .hash = "N-V-__8AAMNh8QMyXlG5iuyWDZmjiXB40JarUNu1a80peP7K",
+        },
+        .zstd = .{
+            .url = "git+https://github.com/facebook/zstd.git?ref=v1.5.7#f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+            .hash = "N-V-__8AAGxifwAAGwXwvsnl_aOXFGLZTeYCu0WBhuEXr96u",
+        },
     },
     .paths = .{
         "build.zig",
