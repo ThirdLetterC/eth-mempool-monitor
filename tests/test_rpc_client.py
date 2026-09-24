@@ -146,20 +146,38 @@ class RPCClientTests(unittest.TestCase):
 
         self.assertEqual(stub.sent, [])
 
-    def test_load_addresses_ignores_comments_and_blank_lines(self) -> None:
+    def test_load_addresses_from_toml(self) -> None:
         stub = StubSocket(response(1, result={"added": ["0x1", "0x2"]}))
         client = self.create_client(stub)
 
         with tempfile.TemporaryDirectory() as directory:
-            address_file = Path(directory, "addresses.txt")
-            address_file.write_text(
-                "# comment\n\n  0x1  \n0x2 # trailing comment\n", encoding="utf-8"
-            )
+            address_file = Path(directory, "addresses.toml")
+            address_file.write_text('addresses = ["0x1", "0x2"]\n', encoding="utf-8")
             result = client.load_addresses_from_file(address_file)
 
         request = json.loads(stub.sent[0])
         self.assertEqual(request["params"], {"addresses": ["0x1", "0x2"]})
         self.assertEqual(result, {"added": ["0x1", "0x2"]})
+
+    def test_load_addresses_rejects_invalid_toml_schema(self) -> None:
+        stub = StubSocket()
+        client = self.create_client(stub)
+
+        with tempfile.TemporaryDirectory() as directory:
+            address_file = Path(directory, "addresses.toml")
+            invalid_documents = [
+                "other = []\n",
+                "addresses = []\n",
+                'addresses = ["0x1", 2]\n',
+                'addresses = ["0x1", ""]\n',
+            ]
+            for document in invalid_documents:
+                with self.subTest(document=document):
+                    address_file.write_text(document, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "addresses"):
+                        client.load_addresses_from_file(address_file)
+
+        self.assertEqual(stub.sent, [])
 
     def test_constructor_rejects_invalid_limits(self) -> None:
         with self.assertRaises(ValueError):

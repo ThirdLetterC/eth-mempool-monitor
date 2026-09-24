@@ -6,8 +6,8 @@ Usage:
     python3 python/load_addresses_example.py <addresses_file> [host] [port] [auth_token]
 
 Example:
-    python3 python/load_addresses_example.py conf/addresses.txt
-    python3 python/load_addresses_example.py conf/addresses.txt 127.0.0.1 8080 my-secret-token
+    python3 python/load_addresses_example.py conf/addresses.toml
+    python3 python/load_addresses_example.py conf/addresses.toml 127.0.0.1 8080 my-secret-token
 """
 
 import argparse
@@ -54,7 +54,7 @@ def load_and_monitor_addresses(
     Load addresses from a file and add them to the monitoring set.
 
     Args:
-        filepath: Path to the file containing addresses (one per line)
+        filepath: Path to a TOML file containing an ``addresses`` array
         host: RPC server host
         port: RPC server port
         auth_token: Authentication token
@@ -125,7 +125,7 @@ def load_and_monitor_addresses(
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("filepath", help="file containing one Ethereum address per line")
+    parser.add_argument("filepath", help="TOML file containing an addresses array")
     parser.add_argument("host", nargs="?", default="127.0.0.1", help="RPC server host")
     parser.add_argument("port", nargs="?", type=int, default=8080, help="RPC server port")
     parser.add_argument("auth_token", nargs="?", help="RPC authentication token")

@@ -5,7 +5,9 @@ description = "Ethereum mempool monitor and Python RPC client utilities"
 readme = "README.md"
 requires-python = ">=3.9.1"
 license = "GPL-3.0-only"
-dependencies = []
+dependencies = [
+    "tomli>=2.0.1; python_version < '3.11'",
+]
 
 [dependency-groups]
 dev = [

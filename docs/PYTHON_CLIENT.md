@@ -59,7 +59,7 @@ with RPCClient(auth_token="your-token") as client:
     )
 
     # Load addresses from a file
-    client.load_addresses_from_file("conf/addresses.txt")
+    client.load_addresses_from_file("conf/addresses.toml")
 
     # Alternative method names (aliases)
     client.add_address("0x4444444444444444444444444444444444444444")
@@ -68,16 +68,16 @@ with RPCClient(auth_token="your-token") as client:
 
 #### Address File Format
 
-When using `load_addresses_from_file()`, the file should contain one address per line:
+When using `load_addresses_from_file()`, the TOML file must define a non-empty top-level
+`addresses` array containing strings:
 
-```
-# This is a comment (lines starting with # are ignored)
-0x1111111111111111111111111111111111111111
-0x2222222222222222222222222222222222222222
-
-# Empty lines are also ignored
-0x3333333333333333333333333333333333333333
-  0x4444444444444444444444444444444444444444  # Whitespace is trimmed
+```toml
+addresses = [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222",
+    "0x3333333333333333333333333333333333333333",
+    "0x4444444444444444444444444444444444444444",
+]
 ```
 
 ### Checking Addresses
@@ -349,6 +349,6 @@ The server may validate Ethereum address format. Ensure addresses:
 ## Requirements
 
 - Python 3.9.1+
-- No external dependencies (standard library only)
+- `tomli` on Python 3.9 and 3.10; Python 3.11+ uses the standard-library TOML parser
 - Running `rpc_control` server
 - Redis/Valkey instance (for the server)

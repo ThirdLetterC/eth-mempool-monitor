@@ -15,7 +15,7 @@ Usage:
     result = client.monitor_add('0x1111111111111111111111111111111111111111')
 
     # Load addresses from a file
-    result = client.load_addresses_from_file('conf/addresses.txt')
+    result = client.load_addresses_from_file('conf/addresses.toml')
 
     # List all monitored addresses
     addresses = client.monitor_list()
@@ -38,6 +38,11 @@ from pathlib import Path
 from threading import Lock
 from types import TracebackType
 from typing import Any, Optional, Union
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10
+    import tomli as tomllib  # pyright: ignore[reportMissingImports]
 
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
@@ -442,14 +447,13 @@ class RPCClient:
 
     def load_addresses_from_file(self, filepath: Union[str, Path]) -> dict[str, Any]:
         """
-        Load addresses from a file and add them to the monitoring set.
+        Load addresses from a TOML file and add them to the monitoring set.
 
-        Reads addresses from the specified file (one address per line),
-        strips whitespace, skips empty lines, removes comments beginning with #,
-        and sends them to the server using monitor_add.
+        Reads the top-level ``addresses`` array from the specified TOML file and
+        sends it to the server using monitor_add.
 
         Args:
-            filepath: Path to the file containing addresses
+            filepath: Path to the TOML file containing an ``addresses`` array
 
         Returns:
             Result information from the server (same as monitor_add)
@@ -457,22 +461,23 @@ class RPCClient:
         Raises:
             FileNotFoundError: If the file does not exist
             IOError: If there's an error reading the file
-            ValueError: If no valid addresses found in the file
+            ValueError: If the TOML is invalid or ``addresses`` is absent/invalid
         """
         try:
-            with Path(filepath).open(encoding="utf-8") as address_file:
-                addresses = [
-                    line
-                    for raw_line in address_file
-                    if (line := raw_line.partition("#")[0].strip())
-                ]
+            with Path(filepath).open("rb") as address_file:
+                document = tomllib.load(address_file)
         except FileNotFoundError as exc:
             raise FileNotFoundError(f"Address file not found: {filepath}") from exc
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Invalid TOML in address file {filepath}: {exc}") from exc
         except OSError as exc:
             raise OSError(f"Error reading address file {filepath}: {exc}") from exc
 
-        if not addresses:
-            raise ValueError(f"No valid addresses found in file: {filepath}")
+        addresses = document.get("addresses")
+        if not isinstance(addresses, list) or not addresses:
+            raise ValueError(f"Address file must define a non-empty 'addresses' array: {filepath}")
+        if any(not isinstance(address, str) or not address.strip() for address in addresses):
+            raise ValueError(f"All entries in 'addresses' must be non-empty strings: {filepath}")
 
         return self.monitor_add(addresses)
 
@@ -590,16 +595,16 @@ def main() -> None:
             print()
 
             # Demonstrate loading addresses from a file
-            # Create a temporary file with some test addresses
+            # Create a temporary TOML file with some test addresses
             import tempfile
 
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
                 temp_file = f.name
-                f.write("# This is a comment\n")
-                f.write("0x4444444444444444444444444444444444444444\n")
-                f.write("\n")  # Empty line
-                f.write("0x5555555555555555555555555555555555555555\n")
-                f.write("  0x6666666666666666666666666666666666666666  \n")  # With whitespace
+                f.write("addresses = [\n")
+                f.write('  "0x4444444444444444444444444444444444444444",\n')
+                f.write('  "0x5555555555555555555555555555555555555555",\n')
+                f.write('  "0x6666666666666666666666666666666666666666",\n')
+                f.write("]\n")
 
             try:
                 print(f"Loading addresses from file: {temp_file}...")
