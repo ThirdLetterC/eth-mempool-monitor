@@ -34,7 +34,9 @@ Useful options:
 - `-Dmimalloc=true`: fetch, statically link, and route allocation through
   mimalloc.
 - `-Dstrip=true`: strip debug symbols.
-- `-Drelease=true`: build in release mode.
+- `-Drelease=true`: build in release mode. Optimized builds default to the
+  baseline CPU model so their binaries run across baseline x86-64 CPUs; pass an
+  explicit `-Dcpu=<model>` when targeting a specific processor.
 
 ## Local Quick Start
 

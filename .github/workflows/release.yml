@@ -28,7 +28,24 @@ jobs:
         with:
           version: 0.16.0
       - name: Build release binaries
-        run: zig build -Drelease=true -Dstrip=true -Dmimalloc=true
+        run: >-
+          zig build -Drelease=true -Dstrip=true -Dmimalloc=true
+          -Dcpu=baseline
+      - name: Verify baseline release binaries
+        run: |
+          set -euo pipefail
+          for binary in \
+            eth_mempool_monitor \
+            rabbitmq_tx_console \
+            rpc_control; do
+            path="./zig-out/bin/${binary}"
+            if objdump -d "${path}" | awk \
+              '/%[yz]mm[0-9]/ { found = 1 } END { exit !found }'; then
+              echo "::error file=${path}::found non-baseline YMM/ZMM instructions"
+              exit 1
+            fi
+            "${path}" --help >/dev/null
+          done
       - name: Prepare release assets
         run: |
           set -euo pipefail

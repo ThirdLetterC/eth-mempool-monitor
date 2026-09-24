@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. Release dates
 and links are based on the published [GitHub releases][releases]; change details
 are summarized from the commits contained in each tagged release.
 
+## [v1.2.1] - 2026-09-24
+
+### Fixed
+
+- Made optimized builds use the baseline CPU model by default so published
+  x86-64 binaries do not inherit unsupported instructions from CI runners.
+- Added release checks that reject YMM/ZMM instructions and smoke-test every
+  executable before upload.
+
 ## [v1.2.0] - 2026-09-24
 
 ### Added
@@ -77,3 +86,4 @@ are summarized from the commits contained in each tagged release.
 [v1.1.0]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.1.0
 [v1.1.1]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.1.1
 [v1.2.0]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.0
+[v1.2.1]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.1

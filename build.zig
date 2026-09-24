@@ -193,7 +193,14 @@ pub fn build(b: *std.Build) void {
         "Strip debug symbols from produced artifacts.",
     ) orelse false;
 
-    const base_target_query = b.standardTargetOptionsQueryOnly(.{});
+    const optimize = if (release_mode) .ReleaseFast else b.standardOptimizeOption(.{});
+    const default_target_query: std.Target.Query = if (optimize == .Debug)
+        .{}
+    else
+        .{ .cpu_model = .baseline };
+    const base_target_query = b.standardTargetOptionsQueryOnly(.{
+        .default_target = default_target_query,
+    });
     const base_target = b.resolveTargetQuery(base_target_query);
 
     var valgrind_target_query = base_target_query;
@@ -203,7 +210,6 @@ pub fn build(b: *std.Build) void {
     const valgrind_target = b.resolveTargetQuery(valgrind_target_query);
 
     const target = if (force_valgrind) valgrind_target else base_target;
-    const optimize = if (release_mode) .ReleaseFast else b.standardOptimizeOption(.{});
     const use_sanitizers = enable_sanitizers and optimize == .Debug and target.result.os.tag != .windows;
     const sanitize_c = if (use_sanitizers) std.zig.SanitizeC.full else std.zig.SanitizeC.off;
     const enable_hardening = target.result.os.tag == .linux;
