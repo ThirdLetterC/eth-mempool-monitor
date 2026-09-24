@@ -56,28 +56,37 @@ jobs:
       - name: Prepare release assets
         run: |
           set -euo pipefail
-          mkdir release-assets
+          mkdir release-assets release-binaries
           install -m 0755 zig-out/bin/eth_mempool_monitor \
-            release-assets/eth_mempool_monitor-linux-x86_64
+            release-binaries/eth_mempool_monitor-linux-x86_64
           install -m 0755 zig-out/bin/rabbitmq_tx_console \
-            release-assets/rabbitmq_tx_console-linux-x86_64
+            release-binaries/rabbitmq_tx_console-linux-x86_64
           install -m 0755 zig-out/bin/http_transmitter \
-            release-assets/http_transmitter-linux-x86_64
+            release-binaries/http_transmitter-linux-x86_64
           install -m 0755 zig-out/bin/rpc_control \
-            release-assets/rpc_control-linux-x86_64
-          cd release-assets
-          zip -9 eth-mempool-monitor-linux-x86_64.zip \
+            release-binaries/rpc_control-linux-x86_64
+          cd release-binaries
+          zip -9 ../release-assets/eth-mempool-monitor-linux-x86_64.zip \
             eth_mempool_monitor-linux-x86_64 \
             http_transmitter-linux-x86_64 \
             rabbitmq_tx_console-linux-x86_64 \
             rpc_control-linux-x86_64
-          sha256sum ./* > SHA256SUMS
+          cd ../release-assets
+          sha256sum eth-mempool-monitor-linux-x86_64.zip > SHA256SUMS
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |-
           set -euo pipefail
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            for asset in \
+              eth_mempool_monitor-linux-x86_64 \
+              http_transmitter-linux-x86_64 \
+              rabbitmq_tx_console-linux-x86_64 \
+              rpc_control-linux-x86_64; do
+              gh release delete-asset "${GITHUB_REF_NAME}" "${asset}" \
+                --yes 2>/dev/null || true
+            done
             gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
           else
             gh release create "${GITHUB_REF_NAME}" release-assets/* \
