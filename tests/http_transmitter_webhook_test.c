@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,8 +13,23 @@
 
 volatile sig_atomic_t http_transmitter_shutdown_signal = 0;
 
+typedef struct test_parallel_delivery_context test_parallel_delivery_context_t;
+struct test_parallel_delivery_context {
+  http_webhook_client_t *client;
+  const char *body;
+  size_t body_length;
+  http_delivery_result_t result;
+};
+
 [[nodiscard]] bool http_transmitter_is_shutdown_requested() {
   return http_transmitter_shutdown_signal != 0;
+}
+
+[[nodiscard]] static void *test_parallel_delivery_worker(void *argument) {
+  test_parallel_delivery_context_t *context = argument;
+  context->result = http_webhook_deliver(context->client, context->body,
+                                         context->body_length);
+  return nullptr;
 }
 
 [[nodiscard]] static uint16_t test_open_server(int *out_socket) {
@@ -117,12 +133,66 @@ test_delivery(uint32_t request_count, const char *status_line,
   return result;
 }
 
+static void test_parallel_delivery() {
+  constexpr size_t WORKER_COUNT = 4;
+  constexpr char BODY[] = "{\"hash\":\"0xparallel\"}";
+  int server = -1;
+  uint16_t port = test_open_server(&server);
+  pid_t child = fork();
+  assert(child >= 0);
+  if (child == 0) {
+    test_server_child(server, (uint32_t)WORKER_COUNT, "204 No Content", BODY,
+                      false);
+  }
+
+  char url[128] = {0};
+  int url_length =
+      snprintf(url, sizeof(url), "http://127.0.0.1:%u/webhook", (unsigned)port);
+  assert(url_length > 0 && (size_t)url_length < sizeof(url));
+  http_transmitter_config_t config = {
+      .webhook_url = url,
+      .connect_timeout = {.value = 1'000},
+      .request_timeout = {.value = 2'000},
+      .max_attempts = 1,
+      .initial_backoff = {.value = 1},
+      .max_backoff = {.value = 1},
+  };
+  http_webhook_client_t clients[WORKER_COUNT] = {0};
+  pthread_t threads[WORKER_COUNT] = {0};
+  test_parallel_delivery_context_t contexts[WORKER_COUNT] = {0};
+  for (size_t i = 0; i < WORKER_COUNT; ++i) {
+    assert(http_webhook_client_init(&clients[i], &config) ==
+           HTTP_TRANSMITTER_STATUS_OK);
+  }
+  for (size_t i = 0; i < WORKER_COUNT; ++i) {
+    contexts[i] = (test_parallel_delivery_context_t){
+        .client = &clients[i],
+        .body = BODY,
+        .body_length = sizeof(BODY) - 1,
+    };
+    assert(pthread_create(&threads[i], nullptr, test_parallel_delivery_worker,
+                          &contexts[i]) == 0);
+  }
+  for (size_t i = 0; i < WORKER_COUNT; ++i) {
+    assert(pthread_join(threads[i], nullptr) == 0);
+    assert(contexts[i].result == HTTP_DELIVERY_SUCCESS);
+    http_webhook_client_cleanup(&clients[i]);
+  }
+  (void)close(server);
+
+  int child_status = 0;
+  assert(waitpid(child, &child_status, 0) == child);
+  assert(WIFEXITED(child_status));
+  assert(WEXITSTATUS(child_status) == EXIT_SUCCESS);
+}
+
 int main() {
   assert(test_delivery(1, "204 No Content", 1, true) == HTTP_DELIVERY_SUCCESS);
   assert(test_delivery(3, "503 Service Unavailable", 3, false) ==
          HTTP_DELIVERY_TRANSIENT_FAILURE);
   assert(test_delivery(1, "302 Found", 1, false) ==
          HTTP_DELIVERY_TRANSIENT_FAILURE);
+  test_parallel_delivery();
 
   http_transmitter_config_t config = {
       .webhook_url = "http://127.0.0.1:1/webhook",

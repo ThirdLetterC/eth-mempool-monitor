@@ -68,17 +68,27 @@ Webhook keys:
 - `webhook.max_attempts`
 - `webhook.initial_backoff_ms`
 - `webhook.max_backoff_ms`
+- `webhook.parallel_requests` (default `1`, maximum `256`; must not exceed
+  `rabbitmq_consumer.prefetch_count`)
 
 Webhook settings can be overridden with `--webhook-url`,
 `--webhook-bearer-token-env`, `--webhook-connect-timeout-ms`,
 `--webhook-timeout-ms`, `--webhook-max-attempts`,
-`--webhook-initial-backoff-ms`, and `--webhook-max-backoff-ms`.
+`--webhook-initial-backoff-ms`, `--webhook-max-backoff-ms`, and
+`--webhook-parallel-requests`.
 
 The complete RabbitMQ message is sent unchanged with
 `Content-Type: application/json`. HTTP 2xx responses are acknowledged.
 Transport errors and non-2xx responses are retried and then requeued; malformed
 or oversized messages are rejected without requeue. Webhook receivers must be
 idempotent because an acknowledgement failure can cause duplicate delivery.
+Each parallel worker owns a separate libcurl handle. RabbitMQ consumption and
+acknowledgements remain serialized on the main transmitter thread. Progress is
+logged from the queue-depth snapshot taken at startup and expands when new
+non-redelivered messages are observed; the counters include sent, remaining,
+in-flight, rejected, and requeued transactions. A different consumer attached
+to the same queue can make the startup total only an estimate of the work this
+process will receive.
 
 Useful flags:
 

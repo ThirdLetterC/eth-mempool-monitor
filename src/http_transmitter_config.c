@@ -28,6 +28,8 @@ constexpr uint32_t HTTP_DEFAULT_MAX_ATTEMPTS = 3;
 constexpr uint32_t HTTP_DEFAULT_INITIAL_BACKOFF_MS = 500;
 constexpr uint32_t HTTP_DEFAULT_MAX_BACKOFF_MS = 5'000;
 constexpr uint32_t HTTP_MAX_ATTEMPTS_LIMIT = 100;
+constexpr uint16_t HTTP_DEFAULT_PARALLEL_REQUESTS = 1;
+constexpr uint16_t HTTP_MAX_PARALLEL_REQUESTS = 256;
 constexpr ulog_level HTTP_DEFAULT_LOG_LEVEL = ULOG_LEVEL_INFO;
 constexpr bool HTTP_DEFAULT_LOG_COLOR = true;
 
@@ -97,6 +99,7 @@ void http_transmitter_config_set_defaults(http_transmitter_config_t *config) {
       .max_attempts = HTTP_DEFAULT_MAX_ATTEMPTS,
       .initial_backoff = {.value = HTTP_DEFAULT_INITIAL_BACKOFF_MS},
       .max_backoff = {.value = HTTP_DEFAULT_MAX_BACKOFF_MS},
+      .parallel_requests = {.value = HTTP_DEFAULT_PARALLEL_REQUESTS},
       .log_level = HTTP_DEFAULT_LOG_LEVEL,
       .log_color = HTTP_DEFAULT_LOG_COLOR,
   };
@@ -140,6 +143,7 @@ void http_transmitter_print_usage(const char *program_name) {
   printf("      --webhook-max-attempts <count>\n");
   printf("      --webhook-initial-backoff-ms <ms>\n");
   printf("      --webhook-max-backoff-ms <ms>\n");
+  printf("      --webhook-parallel-requests <count>\n");
   printf("  -h, --help                          Show this help\n");
 }
 
@@ -339,6 +343,8 @@ http_load_toml_impl(http_transmitter_config_t *config,
   APPLY_U32("webhook.initial_backoff_ms", 1, INT_MAX,
             config->initial_backoff.value);
   APPLY_U32("webhook.max_backoff_ms", 1, INT_MAX, config->max_backoff.value);
+  APPLY_U32("webhook.parallel_requests", 1, HTTP_MAX_PARALLEL_REQUESTS,
+            config->parallel_requests.value);
 #undef APPLY_U32
 
   toml_datum_t level = toml_seek(parsed.toptab, "logging.level");
@@ -429,6 +435,7 @@ http_transmitter_parse_cli(int argc, char *argv[],
     CLI_VALUE("--webhook-initial-backoff-ms",
               overrides->initial_backoff_ms_text)
     CLI_VALUE("--webhook-max-backoff-ms", overrides->max_backoff_ms_text)
+    CLI_VALUE("--webhook-parallel-requests", overrides->parallel_requests_text)
 #undef CLI_VALUE
     if (strcmp(arg, "--rabbitmq-queue-durable") == 0 ||
         strcmp(arg, "--rabbitmq-queue-transient") == 0) {
@@ -517,6 +524,11 @@ http_transmitter_parse_cli(int argc, char *argv[],
   ok = ok && http_apply_cli_u32(overrides->max_backoff_ms_text,
                                 "--webhook-max-backoff-ms", 1, INT_MAX,
                                 &config->max_backoff.value);
+  uint32_t parallel_requests = config->parallel_requests.value;
+  ok = ok && http_apply_cli_u32(overrides->parallel_requests_text,
+                                "--webhook-parallel-requests", 1,
+                                HTTP_MAX_PARALLEL_REQUESTS, &parallel_requests);
+  config->parallel_requests.value = (uint16_t)parallel_requests;
   if (!ok) {
     return APP_CONFIG_STATUS_INVALID_VALUE;
   }
@@ -540,6 +552,11 @@ http_transmitter_finalize_config(http_transmitter_config_t *config) {
   }
   if (config->initial_backoff.value > config->max_backoff.value) {
     ulog_error("Webhook initial backoff must not exceed maximum backoff");
+    return APP_CONFIG_STATUS_INVALID_VALUE;
+  }
+  if (config->parallel_requests.value > config->prefetch_count.value) {
+    ulog_error("Webhook parallel requests must not exceed RabbitMQ prefetch "
+               "count");
     return APP_CONFIG_STATUS_INVALID_VALUE;
   }
   if (config->bearer_token_env != nullptr) {

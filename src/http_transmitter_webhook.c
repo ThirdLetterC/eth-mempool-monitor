@@ -4,11 +4,16 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdckdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-constexpr size_t HTTP_MAX_PAYLOAD_BYTES = 1 * 1'024 * 1'024;
-static char http_payload_buffer[HTTP_MAX_PAYLOAD_BYTES + 1];
+typedef enum http_payload_validation : uint8_t {
+  HTTP_PAYLOAD_VALID = 0,
+  HTTP_PAYLOAD_INVALID,
+  HTTP_PAYLOAD_VALIDATION_ERROR,
+} http_payload_validation_t;
 
 [[nodiscard]] static size_t http_discard_response(char *data, size_t size,
                                                   size_t count, void *context) {
@@ -33,31 +38,41 @@ static char http_payload_buffer[HTTP_MAX_PAYLOAD_BYTES + 1];
   return http_transmitter_is_shutdown_requested() ? 1 : 0;
 }
 
-[[nodiscard]] static bool http_payload_is_json_object(const void *body,
-                                                      size_t body_length) {
+[[nodiscard]] static http_payload_validation_t
+http_validate_json_payload(const void *body, size_t body_length) {
   if (body == nullptr || body_length == 0 ||
-      body_length > HTTP_MAX_PAYLOAD_BYTES) {
+      body_length > HTTP_TRANSMITTER_MAX_PAYLOAD_BYTES) {
     ulog_error("Rejecting invalid RabbitMQ payload length=%zu", body_length);
-    return false;
+    return HTTP_PAYLOAD_INVALID;
   }
   if (memchr(body, '\0', body_length) != nullptr) {
     ulog_error("Rejecting RabbitMQ JSON payload containing an embedded NUL");
-    return false;
+    return HTTP_PAYLOAD_INVALID;
   }
-  memcpy(http_payload_buffer, body, body_length);
-  http_payload_buffer[body_length] = '\0';
-  JSON_Value *root = json_parse_string(http_payload_buffer);
+  size_t allocation_length = 0;
+  if (ckd_add(&allocation_length, body_length, (size_t)1)) {
+    ulog_error("Rejecting RabbitMQ JSON payload with overflowing length");
+    return HTTP_PAYLOAD_VALIDATION_ERROR;
+  }
+  char *payload = calloc(allocation_length, sizeof(char));
+  if (payload == nullptr) {
+    ulog_error("Unable to allocate RabbitMQ JSON validation buffer");
+    return HTTP_PAYLOAD_VALIDATION_ERROR;
+  }
+  memcpy(payload, body, body_length);
+  JSON_Value *root = json_parse_string(payload);
+  free(payload);
   if (root == nullptr) {
     ulog_error("Rejecting malformed RabbitMQ JSON payload (%zu bytes)",
                body_length);
-    return false;
+    return HTTP_PAYLOAD_INVALID;
   }
   bool valid = json_value_get_type(root) == JSONObject;
   json_value_free(root);
   if (!valid) {
     ulog_error("Rejecting RabbitMQ JSON payload that is not an object");
   }
-  return valid;
+  return valid ? HTTP_PAYLOAD_VALID : HTTP_PAYLOAD_INVALID;
 }
 
 [[nodiscard]] static bool http_wait_backoff(uint32_t milliseconds) {
@@ -172,8 +187,13 @@ http_webhook_deliver(http_webhook_client_t *client, const void *body,
       client->config == nullptr) {
     return HTTP_DELIVERY_TRANSIENT_FAILURE;
   }
-  if (!http_payload_is_json_object(body, body_length)) {
+  http_payload_validation_t validation =
+      http_validate_json_payload(body, body_length);
+  if (validation == HTTP_PAYLOAD_INVALID) {
     return HTTP_DELIVERY_PERMANENT_FAILURE;
+  }
+  if (validation == HTTP_PAYLOAD_VALIDATION_ERROR) {
+    return HTTP_DELIVERY_TRANSIENT_FAILURE;
   }
 
   uint32_t backoff = client->config->initial_backoff.value;

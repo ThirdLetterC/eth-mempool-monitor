@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void test_defaults_and_cli_precedence() {
   http_transmitter_config_t config = {0};
@@ -10,6 +11,7 @@ static void test_defaults_and_cli_precedence() {
   assert(config.prefetch_count.value == 1);
   assert(config.max_attempts == 3);
   assert(config.connect_timeout.value == 5'000);
+  assert(config.parallel_requests.value == 1);
 
   char program[] = "http_transmitter_config_test";
   char url_option[] = "--webhook-url";
@@ -18,8 +20,11 @@ static void test_defaults_and_cli_precedence() {
   char attempts[] = "7";
   char prefetch_option[] = "--prefetch-count";
   char prefetch[] = "4";
-  char *argv[] = {program,  url_option,      url,     attempts_option,
-                  attempts, prefetch_option, prefetch};
+  char parallel_option[] = "--webhook-parallel-requests";
+  char parallel[] = "4";
+  char *argv[] = {program,         url_option,      url,
+                  attempts_option, attempts,        prefetch_option,
+                  prefetch,        parallel_option, parallel};
   http_transmitter_cli_overrides_t overrides = {0};
   assert(http_transmitter_parse_cli((int)(sizeof(argv) / sizeof(argv[0])), argv,
                                     &overrides) == APP_CONFIG_STATUS_OK);
@@ -28,6 +33,7 @@ static void test_defaults_and_cli_precedence() {
   assert(strcmp(config.webhook_url, url) == 0);
   assert(config.max_attempts == 7);
   assert(config.prefetch_count.value == 4);
+  assert(config.parallel_requests.value == 4);
   assert(http_transmitter_finalize_config(&config) == APP_CONFIG_STATUS_OK);
   http_transmitter_config_cleanup(&config);
 }
@@ -57,10 +63,45 @@ static void test_bearer_token_environment() {
   assert(unsetenv(ENVIRONMENT_NAME) == 0);
 }
 
+static void test_parallel_requests_toml() {
+  constexpr char TOML[] = "[rabbitmq_consumer]\n"
+                          "prefetch_count = 6\n"
+                          "[webhook]\n"
+                          "url = \"https://example.invalid/webhook\"\n"
+                          "parallel_requests = 6\n";
+  char path[] = "/tmp/http-transmitter-config-XXXXXX";
+  int descriptor = mkstemp(path);
+  assert(descriptor >= 0);
+  assert(write(descriptor, TOML, sizeof(TOML) - 1) ==
+         (ssize_t)(sizeof(TOML) - 1));
+  assert(close(descriptor) == 0);
+
+  http_transmitter_config_t config = {0};
+  http_transmitter_config_set_defaults(&config);
+  http_transmitter_cli_overrides_t overrides = {
+      .config_path = path,
+      .config_path_set = true,
+  };
+  assert(http_transmitter_load_toml_config(&config, &overrides) ==
+         APP_CONFIG_STATUS_OK);
+  assert(config.prefetch_count.value == 6);
+  assert(config.parallel_requests.value == 6);
+  assert(http_transmitter_finalize_config(&config) == APP_CONFIG_STATUS_OK);
+  http_transmitter_config_cleanup(&config);
+  assert(unlink(path) == 0);
+}
+
 static void test_invalid_configuration() {
   http_transmitter_config_t config = {0};
   http_transmitter_config_set_defaults(&config);
   config.webhook_url = "file:///tmp/not-allowed";
+  assert(http_transmitter_finalize_config(&config) ==
+         APP_CONFIG_STATUS_INVALID_VALUE);
+  http_transmitter_config_cleanup(&config);
+
+  http_transmitter_config_set_defaults(&config);
+  config.webhook_url = "https://example.invalid/webhook";
+  config.parallel_requests.value = 2;
   assert(http_transmitter_finalize_config(&config) ==
          APP_CONFIG_STATUS_INVALID_VALUE);
   http_transmitter_config_cleanup(&config);
@@ -69,6 +110,7 @@ static void test_invalid_configuration() {
 int main() {
   test_defaults_and_cli_precedence();
   test_bearer_token_environment();
+  test_parallel_requests_toml();
   test_invalid_configuration();
   return EXIT_SUCCESS;
 }

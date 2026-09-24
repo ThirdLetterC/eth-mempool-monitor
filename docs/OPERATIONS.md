@@ -122,6 +122,11 @@ docker exec -e HTTP_TRANSMITTER_BEARER_TOKEN="..." -it rpc_control \
   --rabbitmq-host rabbitmq
 ```
 
+Set `webhook.parallel_requests` to the desired concurrency. Keep
+`rabbitmq_consumer.prefetch_count` greater than or equal to that value; for
+example, a parallel request count of `8` permits eight simultaneous HTTP
+requests while keeping RabbitMQ acknowledgements serialized.
+
 Do not run the console and transmitter against the same queue when both must
 receive every event: RabbitMQ distributes queue deliveries among consumers.
 Use a separately bound queue for fan-out.

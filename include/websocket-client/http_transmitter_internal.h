@@ -9,12 +9,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+static constexpr size_t HTTP_TRANSMITTER_MAX_PAYLOAD_BYTES = 1 * 1'024 * 1'024;
+
 /*
  * Internal transmitter boundary.
  *
  * RabbitMQ payloads and HTTP responses cross untrusted network boundaries.
- * Configuration owns every *_owned string, the consumer owns AMQP handles,
- * and the webhook client owns its libcurl handle and header list.
+ * Configuration owns every *_owned string. The consumer thread alone owns
+ * AMQP handles and settlement, each bounded work slot owns its payload copy,
+ * and every webhook worker owns one libcurl handle and header list.
  */
 typedef struct http_transmitter_config http_transmitter_config_t;
 struct http_transmitter_config {
@@ -37,6 +40,7 @@ struct http_transmitter_config {
   uint32_t max_attempts;
   app_milliseconds_t initial_backoff;
   app_milliseconds_t max_backoff;
+  app_parallel_request_count_t parallel_requests;
   ulog_level log_level;
   bool log_color;
   char *rabbitmq_host_owned;
@@ -70,6 +74,7 @@ struct http_transmitter_cli_overrides {
   const char *max_attempts_text;
   const char *initial_backoff_ms_text;
   const char *max_backoff_ms_text;
+  const char *parallel_requests_text;
   bool show_help;
 };
 
@@ -79,6 +84,7 @@ struct http_transmitter_consumer {
   amqp_channel_t channel;
   bool logged_in;
   bool channel_open;
+  uint32_t pending_messages_at_connect;
 };
 
 typedef struct http_webhook_client http_webhook_client_t;
@@ -96,6 +102,7 @@ typedef enum http_transmitter_status : uint8_t {
   HTTP_TRANSMITTER_STATUS_PROTOCOL_ERROR,
   HTTP_TRANSMITTER_STATUS_ACK_ERROR,
   HTTP_TRANSMITTER_STATUS_CURL_ERROR,
+  HTTP_TRANSMITTER_STATUS_THREAD_ERROR,
 } http_transmitter_status_t;
 
 typedef enum http_delivery_result : uint8_t {
@@ -104,6 +111,9 @@ typedef enum http_delivery_result : uint8_t {
   HTTP_DELIVERY_TRANSIENT_FAILURE,
   HTTP_DELIVERY_SHUTDOWN,
 } http_delivery_result_t;
+
+static_assert(sizeof(http_transmitter_status_t) == sizeof(uint8_t));
+static_assert(sizeof(http_delivery_result_t) == sizeof(uint8_t));
 
 extern volatile sig_atomic_t http_transmitter_shutdown_signal;
 
@@ -134,7 +144,6 @@ void http_transmitter_rabbitmq_disconnect(
     http_transmitter_consumer_t *consumer);
 [[nodiscard]] http_transmitter_status_t
 http_transmitter_consume_loop(http_transmitter_consumer_t *consumer,
-                              http_webhook_client_t *webhook,
                               const http_transmitter_config_t *config);
 
 [[nodiscard]] http_transmitter_status_t

@@ -28,8 +28,8 @@
   and configuration cleanup.
 - `rpc_control_service.c` owns RPC authentication state, Redis commands, and
   JSON-RPC method dispatch.
-- `http_transmitter_consumer.c` owns the manual-ack RabbitMQ consumer and
-  delivery settlement.
+- `http_transmitter_consumer.c` owns the manual-ack RabbitMQ consumer,
+  delivery settlement, progress statistics, and bounded webhook worker pool.
 - `http_transmitter_webhook.c` validates bounded JSON objects and owns libcurl
   retries, TLS verification, authentication, and HTTP status handling.
 
@@ -62,6 +62,10 @@ The HTTP transmitter acknowledges an event only after a 2xx webhook response.
 Transport and HTTP failures are retried with bounded exponential backoff and
 then requeued. Permanently malformed input is rejected without requeue. This
 also provides at-least-once delivery, so webhook processing must be idempotent.
+Webhook requests may execute concurrently, but the connection-owning thread
+alone consumes and settles RabbitMQ deliveries. Every worker owns its libcurl
+easy handle, and the configured parallel request count bounds both threads and
+copied in-flight payloads.
 
 ## Algorithmic Complexity
 
@@ -92,6 +96,9 @@ Fixed storage includes the 64 KiB receive buffer and 1024 lookup entries.
 Dynamic storage is dominated by parsed JSON (`O(n)`), serialized events
 (`O(t)`), and queued publish payloads. The outbound queue preallocates 4096
 descriptors and is capped at 64 MiB of payload data.
+
+The HTTP transmitter copies at most `webhook.parallel_requests` payloads of up
+to 1 MiB each. Its worker and delivery-slot scans are `O(w)`, where `w <= 256`.
 
 The RPC server accepts at most 256 concurrent clients. Each client may queue at
 most 64 writes or 512 KiB of response data before the connection is closed.

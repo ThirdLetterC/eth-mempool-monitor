@@ -82,31 +82,23 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  http_webhook_client_t webhook = {0};
-  if (http_webhook_client_init(&webhook, &config) !=
-      HTTP_TRANSMITTER_STATUS_OK) {
-    http_transmitter_config_cleanup(&config);
-    (void)ulog_cleanup();
-    return EXIT_FAILURE;
-  }
   http_transmitter_consumer_t consumer = {0};
   if (http_transmitter_rabbitmq_connect(&config, &consumer) !=
       HTTP_TRANSMITTER_STATUS_OK) {
-    http_webhook_client_cleanup(&webhook);
     http_transmitter_config_cleanup(&config);
     (void)ulog_cleanup();
     return EXIT_FAILURE;
   }
 
   ulog_info("Starting HTTP transaction transmitter");
-  ulog_info("Webhook delivery: attempts=%u connect_timeout=%u ms timeout=%u ms",
-            config.max_attempts, config.connect_timeout.value,
-            config.request_timeout.value);
-  bool ok = http_transmitter_consume_loop(&consumer, &webhook, &config) ==
+  ulog_info("Webhook delivery: parallel=%u attempts=%u connect_timeout=%u ms "
+            "timeout=%u ms",
+            (unsigned)config.parallel_requests.value, config.max_attempts,
+            config.connect_timeout.value, config.request_timeout.value);
+  bool ok = http_transmitter_consume_loop(&consumer, &config) ==
             HTTP_TRANSMITTER_STATUS_OK;
 
   http_transmitter_rabbitmq_disconnect(&consumer);
-  http_webhook_client_cleanup(&webhook);
   http_transmitter_config_cleanup(&config);
   (void)ulog_cleanup();
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;

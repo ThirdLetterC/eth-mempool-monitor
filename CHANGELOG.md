@@ -17,6 +17,8 @@ are summarized from the commits contained in each tagged release.
   static HTTP/HTTPS-only library with wolfSSL, plus Docker and release
   packaging, configuration documentation, and loopback webhook regression
   tests.
+- Added bounded parallel webhook delivery and progress statistics reporting
+  total, sent, remaining, in-flight, rejected, and requeued transactions.
 
 ### Changed
 

@@ -32,6 +32,10 @@ typedef struct {
 } app_prefetch_count_t;
 
 typedef struct {
+  uint16_t value;
+} app_parallel_request_count_t;
+
+typedef struct {
   const char *host;
   app_port_t port;
 } app_tcp_endpoint_t;
@@ -102,10 +106,21 @@ app_prefetch_count_from_u64(uint64_t value,
   return true;
 }
 
+[[nodiscard]] static inline bool app_parallel_request_count_from_u64(
+    uint64_t value, app_parallel_request_count_t *out_parallel_request_count) {
+  if (out_parallel_request_count == nullptr || value == 0 ||
+      value > UINT16_MAX) {
+    return false;
+  }
+  out_parallel_request_count->value = (uint16_t)value;
+  return true;
+}
+
 static_assert(sizeof(app_port_t) == sizeof(uint16_t));
 static_assert(sizeof(app_seconds_t) == sizeof(uint32_t));
 static_assert(sizeof(app_milliseconds_t) == sizeof(uint32_t));
 static_assert(sizeof(app_socket_backlog_t) == sizeof(int32_t));
 static_assert(sizeof(app_rabbitmq_channel_t) == sizeof(uint16_t));
 static_assert(sizeof(app_prefetch_count_t) == sizeof(uint16_t));
+static_assert(sizeof(app_parallel_request_count_t) == sizeof(uint16_t));
 static_assert(sizeof(app_config_status_t) == sizeof(uint8_t));

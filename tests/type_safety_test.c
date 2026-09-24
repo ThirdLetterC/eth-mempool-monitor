@@ -19,6 +19,7 @@ int main() {
   app_milliseconds_t milliseconds = {.value = 30};
   app_rabbitmq_channel_t channel = {.value = 1};
   app_prefetch_count_t prefetch = {.value = 100};
+  app_parallel_request_count_t parallel_requests = {.value = 8};
   app_port_t converted_port = {0};
   app_seconds_t converted_seconds = {0};
   app_socket_backlog_t converted_backlog = {0};
@@ -30,6 +31,7 @@ int main() {
   assert(milliseconds.value == 30);
   assert(channel.value == 1);
   assert(prefetch.value == 100);
+  assert(parallel_requests.value == 8);
   assert(app_port_from_u64(443, &converted_port));
   assert(converted_port.value == 443);
   assert(!app_port_from_u64(0, &converted_port));
