@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
 #include "websocket-client/rabbitmq_tx_console_internal.h"
 #include "toml/toml.h"
 #include "ulog/ulog.h"

@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include "jsonrpc/server.h"
 #include "rpc_control/config_internal.h"
 #include "rpc_control/service_internal.h"

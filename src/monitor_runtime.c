@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include "websocket-client/monitor_runtime.h"
 
 #include "websocket-client/subscriber.h"

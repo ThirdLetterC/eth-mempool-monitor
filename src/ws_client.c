@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include "websocket-client/ws_client_internal.h"
 
 #include "ulog/ulog.h"

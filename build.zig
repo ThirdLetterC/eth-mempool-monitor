@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const posix_feature_flag = "-D_POSIX_C_SOURCE=200809L";
+
 const strict_c_flags = [_][]const u8{
     "-std=c23",
     "-Wall",
@@ -11,7 +13,7 @@ const strict_c_flags = [_][]const u8{
 const posix_c_flags = [_][]const u8{
     "-std=c23",
     "-D_DEFAULT_SOURCE",
-    "-D_POSIX_C_SOURCE=200809L",
+    posix_feature_flag,
 };
 
 const hardening_c_flags = [_][]const u8{
@@ -206,6 +208,17 @@ pub fn build(b: *std.Build) void {
         &[_][]const u8{ "-DWC_NO_HARDEN", "-DUSE_MIMALLOC=1" }
     else
         &[_][]const u8{"-DWC_NO_HARDEN"};
+    const project_posix_component_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-DWC_NO_HARDEN",
+            "-DUSE_MIMALLOC=1",
+            posix_feature_flag,
+        }
+    else
+        &[_][]const u8{
+            "-DWC_NO_HARDEN",
+            posix_feature_flag,
+        };
     const hiredis_component_flags = if (use_mimalloc)
         &[_][]const u8{"-DHIREDIS_USE_MIMALLOC=1"}
     else
@@ -216,6 +229,12 @@ pub fn build(b: *std.Build) void {
         no_component_flags;
 
     const c_flags = makeCFlags(b, &strict_c_flags, c_component_flags, enable_hardening);
+    const project_posix_c_flags = makeCFlags(
+        b,
+        &strict_c_flags,
+        project_posix_component_flags,
+        enable_hardening,
+    );
     const ulog_c_flags = makeCFlags(
         b,
         &strict_c_flags,
@@ -275,12 +294,12 @@ pub fn build(b: *std.Build) void {
     }
 
     const websocket_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    addCFiles(b, websocket_module, &.{"src/ws_frame.c"}, c_flags);
     addCFiles(b, websocket_module, &.{
         "src/ws_client.c",
-        "src/ws_frame.c",
         "src/ws_handshake.c",
         "src/ws_transport.c",
-    }, c_flags);
+    }, project_posix_c_flags);
     const websocket_library = b.addLibrary(.{
         .name = "websocket_client",
         .linkage = .static,
@@ -298,10 +317,12 @@ pub fn build(b: *std.Build) void {
         "src/rabbitmq_publisher_replay.c",
         "src/subscriber.c",
         "src/subscriber_message.c",
-        "src/monitor_config.c",
-        "src/monitor_runtime.c",
         "src/main.c",
     }, c_flags);
+    addCFiles(b, monitor_module, &.{
+        "src/monitor_config.c",
+        "src/monitor_runtime.c",
+    }, project_posix_c_flags);
     addCFiles(b, monitor_module, &.{"src/ulog.c"}, ulog_c_flags);
     addCFiles(b, monitor_module, &hiredis_files, hiredis_c_flags);
     addCFiles(b, monitor_module, &rabbitmq_files, rabbitmq_c_flags);
@@ -319,11 +340,13 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, rabbitmq_console_module, &.{
         "src/toml.c",
         "src/parson.c",
+        "src/rabbitmq_tx_console_format.c",
+    }, c_flags);
+    addCFiles(b, rabbitmq_console_module, &.{
         "src/rabbitmq_tx_console.c",
         "src/rabbitmq_tx_console_config.c",
         "src/rabbitmq_tx_console_consumer.c",
-        "src/rabbitmq_tx_console_format.c",
-    }, c_flags);
+    }, project_posix_c_flags);
     addCFiles(b, rabbitmq_console_module, &.{"src/ulog.c"}, ulog_c_flags);
     addCFiles(b, rabbitmq_console_module, &rabbitmq_files, rabbitmq_c_flags);
     if (mimalloc_dependency) |dependency| {
