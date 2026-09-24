@@ -42,10 +42,10 @@ jobs:
             uv.lock
 
       - name: Install Python
-        run: uv python install 3.13
+        run: uv python install 3.14
 
       - name: Sync development tools
-        run: uv sync --locked --only-dev --python 3.13
+        run: uv sync --locked --only-dev --python 3.14
 
       - name: Check formatting
         run: |
