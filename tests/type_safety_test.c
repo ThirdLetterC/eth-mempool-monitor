@@ -1,4 +1,5 @@
 #include "app/domain_types.h"
+#include "app/ethereum_quantity.h"
 #include "websocket-client/rabbitmq_publisher.h"
 #include "websocket-client/subscriber.h"
 #include "websocket-client/ws_client.h"
@@ -21,6 +22,7 @@ int main() {
   app_port_t converted_port = {0};
   app_seconds_t converted_seconds = {0};
   app_socket_backlog_t converted_backlog = {0};
+  char eth_amount[APP_ETH_AMOUNT_CAPACITY] = {0};
 
   assert(port.value == UINT16_MAX);
   assert(seconds.value == 30);
@@ -44,5 +46,22 @@ int main() {
   assert(WS_SUBSCRIBER_STATUS_STOPPED !=
          WS_SUBSCRIBER_STATUS_RECONNECT_REQUIRED);
   assert(APP_CONFIG_STATUS_OK != APP_CONFIG_STATUS_INVALID_VALUE);
+  assert(app_format_wei_as_eth("0x0", eth_amount, sizeof(eth_amount)));
+  assert(strcmp(eth_amount, "0") == 0);
+  assert(app_format_wei_as_eth("0x1", eth_amount, sizeof(eth_amount)));
+  assert(strcmp(eth_amount, "0.000000000000000001") == 0);
+  assert(app_format_wei_as_eth("0xde0b6b3a7640000", eth_amount,
+                               sizeof(eth_amount)));
+  assert(strcmp(eth_amount, "1") == 0);
+  assert(app_format_wei_as_eth("0x14d1120d7b160000", eth_amount,
+                               sizeof(eth_amount)));
+  assert(strcmp(eth_amount, "1.5") == 0);
+  assert(app_format_wei_as_eth(
+      "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      eth_amount, sizeof(eth_amount)));
+  assert(strcmp(eth_amount,
+                "115792089237316195423570985008687907853269984665640564039457."
+                "584007913129639935") == 0);
+  assert(!app_format_wei_as_eth("0xnot-hex", eth_amount, sizeof(eth_amount)));
   return 0;
 }

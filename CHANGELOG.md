@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. Release dates
 and links are based on the published [GitHub releases][releases]; change details
 are summarized from the commits contained in each tagged release.
 
+## [v1.2.4] - 2026-09-24
+
+### Added
+
+- Added exact human-readable ETH amounts to monitored-transaction log lines
+  while retaining the original hexadecimal wei quantity.
+- Added bounded, resumable RPC batching for multi-million-address TOML imports.
+
+### Changed
+
+- Changed the default public Ethereum WebSocket endpoint to PublicNode.
+
 ## [v1.2.3] - 2026-09-24
 
 ### Added
@@ -102,3 +114,4 @@ are summarized from the commits contained in each tagged release.
 [v1.2.0]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.0
 [v1.2.1]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.1
 [v1.2.3]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.3
+[v1.2.4]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.4

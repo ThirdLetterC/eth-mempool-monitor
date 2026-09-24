@@ -1,5 +1,6 @@
 #include "websocket-client/subscriber_internal.h"
 
+#include "app/ethereum_quantity.h"
 #include "parson/parson.h"
 #include "ulog/ulog.h"
 
@@ -414,13 +415,19 @@ ws_subscriber_decode_sismember_reply(const redisReply *reply,
       redis, set_key, members, member_count, out_member_present);
 }
 
-static void ws_subscriber_report_transaction_match(const char *tx_hash,
-                                                   const char *from,
-                                                   const char *to,
-                                                   bool from_monitored,
-                                                   bool to_monitored) {
-  ulog_info("Monitored transaction: hash=%s from=%s%s to=%s%s",
-            tx_hash != nullptr ? tx_hash : "(unknown)",
+static void
+ws_subscriber_report_transaction_match(const char *tx_hash, const char *from,
+                                       const char *to, const char *value,
+                                       bool from_monitored, bool to_monitored) {
+  char amount_eth[APP_ETH_AMOUNT_CAPACITY] = {0};
+  const char *formatted_amount =
+      app_format_wei_as_eth(value, amount_eth, sizeof(amount_eth))
+          ? amount_eth
+          : "(unknown)";
+  ulog_info("Monitored transaction: hash=%s amount_eth=%s value_wei=%s "
+            "from=%s%s to=%s%s",
+            tx_hash != nullptr ? tx_hash : "(unknown)", formatted_amount,
+            value != nullptr ? value : "(unknown)",
             from != nullptr ? from : "(none)",
             from_monitored ? " [monitored]" : "", to != nullptr ? to : "(none)",
             to_monitored ? " [monitored]" : "");
@@ -516,6 +523,7 @@ static void ws_subscriber_handle_transaction_object(
   auto tx_hash = json_object_get_string(tx, "hash");
   auto from = json_object_get_string(tx, "from");
   auto to = json_object_get_string(tx, "to");
+  auto value = json_object_get_string(tx, "value");
 
   if (runtime_config == nullptr || runtime_config->redis == nullptr ||
       runtime_config->monitored_set_key == nullptr) {
@@ -603,8 +611,8 @@ static void ws_subscriber_handle_transaction_object(
   }
 
   if ((from_checked && from_monitored) || (to_checked && to_monitored)) {
-    ws_subscriber_report_transaction_match(tx_hash, from, to, from_monitored,
-                                           to_monitored);
+    ws_subscriber_report_transaction_match(tx_hash, from, to, value,
+                                           from_monitored, to_monitored);
     ws_subscriber_publish_transaction_match(
         tx, tx_hash, from, to, from_monitored, to_monitored, runtime_config);
   } else if (tx_hash != nullptr) {
