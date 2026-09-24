@@ -8,6 +8,8 @@
    transaction with `eth_getTransactionByHash`.
 1. The monitor checks each transaction's `from` and `to` addresses in Redis.
 1. Matching transactions are published to RabbitMQ as JSON.
+1. Optionally, `http_transmitter` consumes those events and POSTs the original
+   JSON bytes to a configured webhook.
 
 ## Application Modules
 
@@ -26,6 +28,10 @@
   and configuration cleanup.
 - `rpc_control_service.c` owns RPC authentication state, Redis commands, and
   JSON-RPC method dispatch.
+- `http_transmitter_consumer.c` owns the manual-ack RabbitMQ consumer and
+  delivery settlement.
+- `http_transmitter_webhook.c` validates bounded JSON objects and owns libcurl
+  retries, TLS verification, authentication, and HTTP status handling.
 
 ## RabbitMQ Event Payload
 
@@ -51,6 +57,11 @@ publisher confirms, and schedules reconnect backoff with a libuv timer.
 Unconfirmed batches remain at the ring head for replay, providing at-least-once
 delivery semantics. Queue admission, rather than broker confirmation, is the
 success boundary returned to the subscriber.
+
+The HTTP transmitter acknowledges an event only after a 2xx webhook response.
+Transport and HTTP failures are retried with bounded exponential backoff and
+then requeued. Permanently malformed input is rejected without requeue. This
+also provides at-least-once delivery, so webhook processing must be idempotent.
 
 ## Algorithmic Complexity
 

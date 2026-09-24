@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. Release dates
 and links are based on the published [GitHub releases][releases]; change details
 are summarized from the commits contained in each tagged release.
 
+## [v1.2.6] - 2026-09-24
+
+### Added
+
+- Added the `http_transmitter` binary for forwarding monitored-transaction
+  events from RabbitMQ to a predefined HTTP or HTTPS webhook as JSON.
+- Added optional environment-backed bearer authentication, bounded retry and
+  exponential backoff, request timeouts, and at-least-once delivery through
+  manual RabbitMQ acknowledgements.
+- Added pinned libcurl integration, Docker and release packaging, configuration
+  documentation, and loopback webhook regression tests.
+
+### Security
+
+- Reject malformed or oversized RabbitMQ payloads without requeue, preserve TLS
+  peer and hostname verification, and prevent bearer-token forwarding through
+  HTTP redirects.
+
 ## [v1.2.5] - 2026-09-24
 
 ### Added
@@ -126,3 +144,4 @@ are summarized from the commits contained in each tagged release.
 [v1.2.3]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.3
 [v1.2.4]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.4
 [v1.2.5]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.5
+[v1.2.6]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.6

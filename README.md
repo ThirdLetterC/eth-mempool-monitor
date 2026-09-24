@@ -7,11 +7,13 @@
 filters them against addresses stored in Redis/Valkey, and publishes matching
 transactions to RabbitMQ.
 
-The project builds three binaries:
+The project builds four binaries:
 
 - `eth_mempool_monitor`: WebSocket subscriber, Redis filter, and RabbitMQ publisher.
 - `rpc_control`: authenticated JSON-RPC server for managing monitored addresses.
 - `rabbitmq_tx_console`: console consumer for monitored-transaction events.
+- `http_transmitter`: RabbitMQ consumer that POSTs monitored-transaction JSON
+  to a configured webhook with at-least-once delivery.
 
 ## Quick Start
 
@@ -24,6 +26,7 @@ Set a unique `rpc_control.auth_token` in `conf/config.toml`, then run:
 docker compose -f compose.yml up -d
 zig build
 zig build run-rpc-control -- --config conf/config.toml
+zig build run-http-transmitter -- --config conf/config.toml
 ```
 
 In another terminal, start the monitor:

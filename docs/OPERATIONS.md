@@ -5,6 +5,7 @@
 - Zig 0.16.0
 - uv for the Python development environment
 - wolfSSL development library (`libwolfssl`)
+- OpenSSL development library (`libssl`), used by the packaged libcurl build
 - libuv development library (`libuv`)
 - Network access on the first `-Dmimalloc=true` build so Zig can fetch the
   pinned mimalloc source dependency
@@ -24,6 +25,7 @@ Available Zig steps:
 - `zig build`
 - `zig build run-example -- [args...]`
 - `zig build run-rabbitmq-console -- [args...]`
+- `zig build run-http-transmitter -- [args...]`
 - `zig build run-rpc-control -- [args...]`
 - `zig build -Dvalgrind=true valgrind-rpc-control -- [args...]`
 
@@ -100,6 +102,19 @@ docker exec -it rpc_control /usr/local/bin/rabbitmq_tx_console \
   --config /config/config.toml \
   --rabbitmq-host rabbitmq
 ```
+
+Forward RabbitMQ events to the configured webhook:
+
+```bash
+docker exec -e HTTP_TRANSMITTER_BEARER_TOKEN="..." -it rpc_control \
+  /usr/local/bin/http_transmitter \
+  --config /config/config.toml \
+  --rabbitmq-host rabbitmq
+```
+
+Do not run the console and transmitter against the same queue when both must
+receive every event: RabbitMQ distributes queue deliveries among consumers.
+Use a separately bound queue for fan-out.
 
 ## Diagnostics
 

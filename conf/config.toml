@@ -50,6 +50,16 @@ read_timeout_seconds = 1
 prefetch_count = 200
 auto_ack = false
 
+[webhook]
+url = "http://127.0.0.1:9000/webhook"
+# Optional: the token value is read from this environment variable at startup.
+# bearer_token_env = "HTTP_TRANSMITTER_BEARER_TOKEN"
+connect_timeout_ms = 5000
+request_timeout_ms = 15000
+max_attempts = 3
+initial_backoff_ms = 500
+max_backoff_ms = 5000
+
 [logging]
 level = "info"
 color = true

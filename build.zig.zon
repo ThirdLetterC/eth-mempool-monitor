@@ -9,6 +9,10 @@
             .hash = "N-V-__8AAJ2kWgAyMSn9Yf-t-pUPi1ZkFkG6UUOmXod6BvPG",
             .lazy = true,
         },
+        .curl = .{
+            .url = "git+https://github.com/allyourcodebase/curl.git#c59c65cd767951abfe9ac0b1e075e64733953361",
+            .hash = "curl-8.18.0-mFDAWPf7AACO9V1eofR62eABcrB1QQtT1a-DN5XumC53",
+        },
     },
     .paths = .{
         "build.zig",

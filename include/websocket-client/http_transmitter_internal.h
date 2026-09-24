@@ -1,0 +1,146 @@
+#pragma once
+
+#include "app/domain_types.h"
+#include "rabbitmq/amqp.h"
+#include "ulog/ulog.h"
+
+#include <curl/curl.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/*
+ * Internal transmitter boundary.
+ *
+ * RabbitMQ payloads and HTTP responses cross untrusted network boundaries.
+ * Configuration owns every *_owned string, the consumer owns AMQP handles,
+ * and the webhook client owns its libcurl handle and header list.
+ */
+typedef struct http_transmitter_config http_transmitter_config_t;
+struct http_transmitter_config {
+  const char *rabbitmq_host;
+  app_port_t rabbitmq_port;
+  const char *rabbitmq_username;
+  const char *rabbitmq_password;
+  const char *rabbitmq_vhost;
+  const char *rabbitmq_queue;
+  bool rabbitmq_queue_durable;
+  app_rabbitmq_channel_t rabbitmq_channel;
+  app_seconds_t rabbitmq_heartbeat;
+  app_seconds_t read_timeout;
+  app_prefetch_count_t prefetch_count;
+  const char *webhook_url;
+  const char *bearer_token_env;
+  const char *bearer_token;
+  app_milliseconds_t connect_timeout;
+  app_milliseconds_t request_timeout;
+  uint32_t max_attempts;
+  app_milliseconds_t initial_backoff;
+  app_milliseconds_t max_backoff;
+  ulog_level log_level;
+  bool log_color;
+  char *rabbitmq_host_owned;
+  char *rabbitmq_username_owned;
+  char *rabbitmq_password_owned;
+  char *rabbitmq_vhost_owned;
+  char *rabbitmq_queue_owned;
+  char *webhook_url_owned;
+  char *bearer_token_env_owned;
+  char *bearer_token_owned;
+};
+
+typedef struct http_transmitter_cli_overrides http_transmitter_cli_overrides_t;
+struct http_transmitter_cli_overrides {
+  const char *config_path;
+  bool config_path_set;
+  const char *rabbitmq_host;
+  const char *rabbitmq_port_text;
+  const char *rabbitmq_username;
+  const char *rabbitmq_password;
+  const char *rabbitmq_vhost;
+  const char *rabbitmq_queue;
+  const char *read_timeout_seconds_text;
+  const char *prefetch_count_text;
+  bool rabbitmq_queue_durable_set;
+  bool rabbitmq_queue_durable;
+  const char *webhook_url;
+  const char *bearer_token_env;
+  const char *connect_timeout_ms_text;
+  const char *request_timeout_ms_text;
+  const char *max_attempts_text;
+  const char *initial_backoff_ms_text;
+  const char *max_backoff_ms_text;
+  bool show_help;
+};
+
+typedef struct http_transmitter_consumer http_transmitter_consumer_t;
+struct http_transmitter_consumer {
+  amqp_connection_state_t connection;
+  amqp_channel_t channel;
+  bool logged_in;
+  bool channel_open;
+};
+
+typedef struct http_webhook_client http_webhook_client_t;
+struct http_webhook_client {
+  CURL *easy;
+  struct curl_slist *headers;
+  const http_transmitter_config_t *config;
+};
+
+typedef enum http_transmitter_status : uint8_t {
+  HTTP_TRANSMITTER_STATUS_OK = 0,
+  HTTP_TRANSMITTER_STATUS_INVALID_CONFIG,
+  HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED,
+  HTTP_TRANSMITTER_STATUS_CONNECTION_ERROR,
+  HTTP_TRANSMITTER_STATUS_PROTOCOL_ERROR,
+  HTTP_TRANSMITTER_STATUS_ACK_ERROR,
+  HTTP_TRANSMITTER_STATUS_CURL_ERROR,
+} http_transmitter_status_t;
+
+typedef enum http_delivery_result : uint8_t {
+  HTTP_DELIVERY_SUCCESS = 0,
+  HTTP_DELIVERY_PERMANENT_FAILURE,
+  HTTP_DELIVERY_TRANSIENT_FAILURE,
+  HTTP_DELIVERY_SHUTDOWN,
+} http_delivery_result_t;
+
+extern volatile sig_atomic_t http_transmitter_shutdown_signal;
+
+[[nodiscard]] bool http_transmitter_is_shutdown_requested();
+void http_transmitter_print_usage(const char *program_name);
+void http_transmitter_config_set_defaults(http_transmitter_config_t *config);
+void http_transmitter_config_cleanup(http_transmitter_config_t *config);
+[[nodiscard]] app_config_status_t
+http_transmitter_parse_cli(int argc, char *argv[],
+                           http_transmitter_cli_overrides_t *overrides);
+[[nodiscard]] app_config_status_t http_transmitter_load_toml_config(
+    http_transmitter_config_t *config,
+    const http_transmitter_cli_overrides_t *overrides);
+[[nodiscard]] app_config_status_t http_transmitter_apply_cli_overrides(
+    http_transmitter_config_t *config,
+    const http_transmitter_cli_overrides_t *overrides);
+[[nodiscard]] app_config_status_t
+http_transmitter_finalize_config(http_transmitter_config_t *config);
+
+[[nodiscard]] bool http_transmitter_apply_log_level(ulog_level level);
+[[nodiscard]] bool http_transmitter_apply_log_color(bool enabled);
+[[nodiscard]] bool http_transmitter_apply_log_style_defaults();
+
+[[nodiscard]] http_transmitter_status_t
+http_transmitter_rabbitmq_connect(const http_transmitter_config_t *config,
+                                  http_transmitter_consumer_t *consumer);
+void http_transmitter_rabbitmq_disconnect(
+    http_transmitter_consumer_t *consumer);
+[[nodiscard]] http_transmitter_status_t
+http_transmitter_consume_loop(http_transmitter_consumer_t *consumer,
+                              http_webhook_client_t *webhook,
+                              const http_transmitter_config_t *config);
+
+[[nodiscard]] http_transmitter_status_t
+http_webhook_client_init(http_webhook_client_t *client,
+                         const http_transmitter_config_t *config);
+void http_webhook_client_cleanup(http_webhook_client_t *client);
+[[nodiscard]] http_delivery_result_t
+http_webhook_deliver(http_webhook_client_t *client, const void *body,
+                     size_t body_length);

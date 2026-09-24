@@ -1,4 +1,5 @@
 const std = @import("std");
+const curl_package = @import("curl");
 
 const posix_feature_flag = "-D_POSIX_C_SOURCE=200809L";
 
@@ -217,6 +218,21 @@ pub fn build(b: *std.Build) void {
         b.lazyDependency("mimalloc", .{}) orelse return
     else
         null;
+    _ = b.systemIntegrationOption("openssl", .{ .default = true });
+    const curl_dependency = b.dependency("curl", .{
+        .target = target,
+        .optimize = .ReleaseFast,
+        .linkage = .dynamic,
+        .@"use-wolfssl" = false,
+        .@"use-openssl" = true,
+        .libpsl = false,
+        .libssh2 = false,
+        .libidn2 = false,
+        .nghttp2 = false,
+        .zlib = false,
+        .@"http-only" = true,
+    });
+    const curl_library = curl_package.artifact(curl_dependency, .lib);
 
     const no_component_flags = &[_][]const u8{};
     const c_component_flags = if (use_mimalloc)
@@ -352,6 +368,48 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run first-party C type-safety tests");
     test_step.dependOn(&run_type_test.step);
 
+    const http_config_test_module = createCModule(
+        b,
+        target,
+        .Debug,
+        false,
+        sanitize_c,
+    );
+    addCFiles(b, http_config_test_module, &.{"src/toml.c"}, c_flags);
+    addCFiles(b, http_config_test_module, &.{
+        "tests/http_transmitter_config_test.c",
+        "src/http_transmitter_config.c",
+    }, project_posix_c_flags);
+    addCFiles(b, http_config_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    http_config_test_module.linkLibrary(curl_library);
+    const http_config_test = b.addExecutable(.{
+        .name = "http_transmitter_config_test",
+        .root_module = http_config_test_module,
+    });
+    const run_http_config_test = b.addRunArtifact(http_config_test);
+    test_step.dependOn(&run_http_config_test.step);
+
+    const http_webhook_test_module = createCModule(
+        b,
+        target,
+        .Debug,
+        false,
+        sanitize_c,
+    );
+    addCFiles(b, http_webhook_test_module, &.{"src/parson.c"}, c_flags);
+    addCFiles(b, http_webhook_test_module, &.{
+        "tests/http_transmitter_webhook_test.c",
+        "src/http_transmitter_webhook.c",
+    }, project_posix_c_flags);
+    addCFiles(b, http_webhook_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    http_webhook_test_module.linkLibrary(curl_library);
+    const http_webhook_test = b.addExecutable(.{
+        .name = "http_transmitter_webhook_test",
+        .root_module = http_webhook_test_module,
+    });
+    const run_http_webhook_test = b.addRunArtifact(http_webhook_test);
+    test_step.dependOn(&run_http_webhook_test.step);
+
     const monitor_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
     addCFiles(b, monitor_module, &.{
         "src/parg.c",
@@ -417,6 +475,49 @@ pub fn build(b: *std.Build) void {
         rabbitmq_console,
         "run-rabbitmq-console",
         "Run RabbitMQ monitored transaction console",
+    );
+
+    const http_transmitter_module = createCModule(
+        b,
+        target,
+        optimize,
+        strip_binaries,
+        sanitize_c,
+    );
+    addCFiles(b, http_transmitter_module, &.{
+        "src/toml.c",
+        "src/parson.c",
+    }, c_flags);
+    addCFiles(b, http_transmitter_module, &.{
+        "src/http_transmitter.c",
+        "src/http_transmitter_config.c",
+        "src/http_transmitter_consumer.c",
+        "src/http_transmitter_webhook.c",
+    }, project_posix_c_flags);
+    addCFiles(b, http_transmitter_module, &.{"src/ulog.c"}, ulog_c_flags);
+    addCFiles(b, http_transmitter_module, &rabbitmq_files, rabbitmq_c_flags);
+    if (mimalloc_dependency) |dependency| {
+        http_transmitter_module.addIncludePath(dependency.path("include"));
+    }
+    http_transmitter_module.linkLibrary(curl_library);
+    http_transmitter_module.linkSystemLibrary("wolfssl", .{});
+    linkOptionalLibrary(http_transmitter_module, mimalloc_library);
+
+    const http_transmitter = addExecutable(
+        b,
+        "http_transmitter",
+        http_transmitter_module,
+        enable_hardening,
+    );
+    http_transmitter.each_lib_rpath = false;
+    http_transmitter.root_module.addRPathSpecial("$ORIGIN");
+    http_transmitter.root_module.addRPathSpecial("$ORIGIN/../lib");
+    b.installArtifact(curl_library);
+    addRunStep(
+        b,
+        http_transmitter,
+        "run-http-transmitter",
+        "Run RabbitMQ-to-webhook transaction transmitter",
     );
 
     const rpc_control_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);

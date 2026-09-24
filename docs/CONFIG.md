@@ -50,6 +50,36 @@ When that happens, the monitor automatically sends `eth_getTransactionByHash` ov
 - `rabbitmq_consumer.prefetch_count`
 - `rabbitmq_consumer.auto_ack`
 
+## `http_transmitter` keys
+
+The transmitter uses the same `rabbitmq.*` connection and queue keys as the
+console. It always uses manual acknowledgements; `rabbitmq_consumer.auto_ack`
+is ignored. Its consumer keys are:
+
+- `rabbitmq_consumer.read_timeout_seconds`
+- `rabbitmq_consumer.prefetch_count`
+
+Webhook keys:
+
+- `webhook.url` (required, `http://` or `https://`)
+- `webhook.bearer_token_env` (optional environment-variable name)
+- `webhook.connect_timeout_ms`
+- `webhook.request_timeout_ms`
+- `webhook.max_attempts`
+- `webhook.initial_backoff_ms`
+- `webhook.max_backoff_ms`
+
+Webhook settings can be overridden with `--webhook-url`,
+`--webhook-bearer-token-env`, `--webhook-connect-timeout-ms`,
+`--webhook-timeout-ms`, `--webhook-max-attempts`,
+`--webhook-initial-backoff-ms`, and `--webhook-max-backoff-ms`.
+
+The complete RabbitMQ message is sent unchanged with
+`Content-Type: application/json`. HTTP 2xx responses are acknowledged.
+Transport errors and non-2xx responses are retried and then requeued; malformed
+or oversized messages are rejected without requeue. Webhook receivers must be
+idempotent because an acknowledgement failure can cause duplicate delivery.
+
 Useful flags:
 
 - `--config <path>`
