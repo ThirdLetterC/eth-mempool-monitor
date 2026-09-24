@@ -1,16 +1,185 @@
 const std = @import("std");
 
+const strict_c_flags = [_][]const u8{
+    "-std=c23",
+    "-Wall",
+    "-Wextra",
+    "-Wpedantic",
+    "-Werror",
+};
+
+const posix_c_flags = [_][]const u8{
+    "-std=c23",
+    "-D_DEFAULT_SOURCE",
+    "-D_POSIX_C_SOURCE=200809L",
+};
+
+const hardening_c_flags = [_][]const u8{
+    "-fstack-protector-strong",
+    "-D_FORTIFY_SOURCE=3",
+    "-fPIE",
+};
+
+const jsonrpc_files = [_][]const u8{
+    "src/jsonrpc/arena.c",
+    "src/jsonrpc/jsonrpc.c",
+    "src/jsonrpc/parson.c",
+    "src/jsonrpc/server.c",
+};
+
+const hiredis_files = [_][]const u8{
+    "src/hiredis/alloc.c",
+    "src/hiredis/async.c",
+    "src/hiredis/dict.c",
+    "src/hiredis/hiredis.c",
+    "src/hiredis/net.c",
+    "src/hiredis/read.c",
+    "src/hiredis/sds.c",
+};
+
+const rabbitmq_files = [_][]const u8{
+    "src/rabbitmq/amqp_api.c",
+    "src/rabbitmq/amqp_connection.c",
+    "src/rabbitmq/amqp_consumer.c",
+    "src/rabbitmq/amqp_framing.c",
+    "src/rabbitmq/amqp_mem.c",
+    "src/rabbitmq/amqp_openssl.c",
+    "src/rabbitmq/amqp_openssl_bio.c",
+    "src/rabbitmq/amqp_socket.c",
+    "src/rabbitmq/amqp_table.c",
+    "src/rabbitmq/amqp_tcp_socket.c",
+    "src/rabbitmq/amqp_time.c",
+    "src/rabbitmq/amqp_url.c",
+};
+
+fn makeCFlags(
+    b: *std.Build,
+    base_flags: []const []const u8,
+    component_flags: []const []const u8,
+    enable_hardening: bool,
+) []const []const u8 {
+    const hardening_count = if (enable_hardening) hardening_c_flags.len else 0;
+    const flags = b.allocator.alloc(
+        []const u8,
+        base_flags.len + component_flags.len + hardening_count,
+    ) catch @panic("failed to allocate C compiler flags");
+
+    var index: usize = 0;
+    for (base_flags) |flag| {
+        flags[index] = flag;
+        index += 1;
+    }
+    for (component_flags) |flag| {
+        flags[index] = flag;
+        index += 1;
+    }
+    if (enable_hardening) {
+        for (hardening_c_flags) |flag| {
+            flags[index] = flag;
+            index += 1;
+        }
+    }
+
+    return flags;
+}
+
+fn createCModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    strip_binaries: bool,
+    sanitize_c: std.zig.SanitizeC,
+) *std.Build.Module {
+    const module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .strip = strip_binaries,
+        .link_libc = true,
+        .sanitize_c = sanitize_c,
+    });
+    module.addIncludePath(b.path("include"));
+    return module;
+}
+
+fn addCFiles(
+    b: *std.Build,
+    module: *std.Build.Module,
+    files: []const []const u8,
+    flags: []const []const u8,
+) void {
+    for (files) |file| {
+        module.addCSourceFile(.{ .file = b.path(file), .flags = flags });
+    }
+}
+
+fn addExecutable(
+    b: *std.Build,
+    name: []const u8,
+    module: *std.Build.Module,
+    enable_hardening: bool,
+) *std.Build.Step.Compile {
+    const executable = b.addExecutable(.{
+        .name = name,
+        .root_module = module,
+    });
+    if (enable_hardening) {
+        executable.pie = true;
+        executable.link_z_relro = true;
+        executable.link_z_lazy = false;
+    }
+    b.installArtifact(executable);
+    return executable;
+}
+
+fn linkOptionalLibrary(
+    module: *std.Build.Module,
+    library: ?*std.Build.Step.Compile,
+) void {
+    if (library) |enabled_library| {
+        module.linkLibrary(enabled_library);
+    }
+}
+
+fn addRunStep(
+    b: *std.Build,
+    executable: *std.Build.Step.Compile,
+    name: []const u8,
+    description: []const u8,
+) void {
+    const run_artifact = b.addRunArtifact(executable);
+    if (b.args) |args| {
+        run_artifact.addArgs(args);
+    }
+
+    const run_step = b.step(name, description);
+    run_step.dependOn(&run_artifact.step);
+}
+
 pub fn build(b: *std.Build) void {
     const release_mode = b.option(
         bool,
         "release",
         "Build in release mode (equivalent to -Doptimize=ReleaseFast).",
     ) orelse false;
-
     const force_valgrind = b.option(
         bool,
         "valgrind",
         "Force baseline CPU features for Valgrind compatibility.",
+    ) orelse false;
+    const enable_sanitizers = b.option(
+        bool,
+        "sanitizers",
+        "Enable ASan/UBSan/LSan for C sources in Debug builds.",
+    ) orelse false;
+    const use_mimalloc = b.option(
+        bool,
+        "mimalloc",
+        "Enable mimalloc malloc/free override for executables.",
+    ) orelse false;
+    const strip_binaries = b.option(
+        bool,
+        "strip",
+        "Strip debug symbols from produced artifacts.",
     ) orelse false;
 
     const base_target_query = b.standardTargetOptionsQueryOnly(.{});
@@ -24,23 +193,6 @@ pub fn build(b: *std.Build) void {
 
     const target = if (force_valgrind) valgrind_target else base_target;
     const optimize = if (release_mode) .ReleaseFast else b.standardOptimizeOption(.{});
-
-    const enable_sanitizers = b.option(
-        bool,
-        "sanitizers",
-        "Enable ASan/UBSan/LSan for C sources in Debug builds.",
-    ) orelse false;
-
-    const use_mimalloc = b.option(
-        bool,
-        "mimalloc",
-        "Enable mimalloc malloc/free override for executables.",
-    ) orelse false;
-    const strip_binaries = b.option(
-        bool,
-        "strip",
-        "Strip debug symbols from produced artifacts.",
-    ) orelse false;
     const use_sanitizers = enable_sanitizers and optimize == .Debug and target.result.os.tag != .windows;
     const sanitize_c = if (use_sanitizers) std.zig.SanitizeC.full else std.zig.SanitizeC.off;
     const enable_hardening = target.result.os.tag == .linux;
@@ -49,186 +201,45 @@ pub fn build(b: *std.Build) void {
     else
         null;
 
-    const c_flags = if (use_mimalloc)
-        if (enable_hardening)
-            &[_][]const u8{
-                "-std=c23",
-                "-Wall",
-                "-Wextra",
-                "-Wpedantic",
-                "-Werror",
-                "-DWC_NO_HARDEN",
-                "-DUSE_MIMALLOC=1",
-                "-fstack-protector-strong",
-                "-D_FORTIFY_SOURCE=3",
-                "-fPIE",
-            }
-        else
-            &[_][]const u8{
-                "-std=c23",
-                "-Wall",
-                "-Wextra",
-                "-Wpedantic",
-                "-Werror",
-                "-DWC_NO_HARDEN",
-                "-DUSE_MIMALLOC=1",
-            }
-    else if (enable_hardening)
-        &[_][]const u8{
-            "-std=c23",
-            "-Wall",
-            "-Wextra",
-            "-Wpedantic",
-            "-Werror",
-            "-DWC_NO_HARDEN",
-            "-fstack-protector-strong",
-            "-D_FORTIFY_SOURCE=3",
-            "-fPIE",
-        }
+    const no_component_flags = &[_][]const u8{};
+    const c_component_flags = if (use_mimalloc)
+        &[_][]const u8{ "-DWC_NO_HARDEN", "-DUSE_MIMALLOC=1" }
     else
-        &[_][]const u8{
-            "-std=c23",
-            "-Wall",
-            "-Wextra",
-            "-Wpedantic",
-            "-Werror",
-            "-DWC_NO_HARDEN",
-        };
-    const ulog_c_flags = if (enable_hardening)
-        &[_][]const u8{
-            "-std=c23",
-            "-Wall",
-            "-Wextra",
-            "-Wpedantic",
-            "-Werror",
-            "-DULOG_BUILD_DYNAMIC_CONFIG=1",
-            "-fstack-protector-strong",
-            "-D_FORTIFY_SOURCE=3",
-            "-fPIE",
-        }
+        &[_][]const u8{"-DWC_NO_HARDEN"};
+    const hiredis_component_flags = if (use_mimalloc)
+        &[_][]const u8{"-DHIREDIS_USE_MIMALLOC=1"}
     else
-        &[_][]const u8{
-            "-std=c23",
-            "-Wall",
-            "-Wextra",
-            "-Wpedantic",
-            "-Werror",
-            "-DULOG_BUILD_DYNAMIC_CONFIG=1",
-        };
-    const hiredis_c_flags = if (use_mimalloc)
-        if (enable_hardening)
-            &[_][]const u8{
-                "-std=c23",
-                "-D_DEFAULT_SOURCE",
-                "-D_POSIX_C_SOURCE=200809L",
-                "-DHIREDIS_USE_MIMALLOC=1",
-                "-fstack-protector-strong",
-                "-D_FORTIFY_SOURCE=3",
-                "-fPIE",
-            }
-        else
-            &[_][]const u8{
-                "-std=c23",
-                "-D_DEFAULT_SOURCE",
-                "-D_POSIX_C_SOURCE=200809L",
-                "-DHIREDIS_USE_MIMALLOC=1",
-            }
-    else if (enable_hardening)
-        &[_][]const u8{
-            "-std=c23",
-            "-D_DEFAULT_SOURCE",
-            "-D_POSIX_C_SOURCE=200809L",
-            "-fstack-protector-strong",
-            "-D_FORTIFY_SOURCE=3",
-            "-fPIE",
-        }
+        no_component_flags;
+    const jsonrpc_component_flags = if (use_mimalloc)
+        &[_][]const u8{"-DUSE_MIMALLOC=1"}
     else
-        &[_][]const u8{
-            "-std=c23",
-            "-D_DEFAULT_SOURCE",
-            "-D_POSIX_C_SOURCE=200809L",
-        };
-    const rabbitmq_c_flags = if (enable_hardening)
-        &[_][]const u8{
-            "-std=c23",
-            "-D_DEFAULT_SOURCE",
-            "-D_POSIX_C_SOURCE=200809L",
-            "-DHAVE_POLL",
-            "-DWC_NO_HARDEN",
-            "-fstack-protector-strong",
-            "-D_FORTIFY_SOURCE=3",
-            "-fPIE",
-        }
-    else
-        &[_][]const u8{
-            "-std=c23",
-            "-D_DEFAULT_SOURCE",
-            "-D_POSIX_C_SOURCE=200809L",
-            "-DHAVE_POLL",
-            "-DWC_NO_HARDEN",
-        };
-    const jsonrpc_c_flags = if (use_mimalloc)
-        if (enable_hardening)
-            &[_][]const u8{
-                "-std=c23",
-                "-D_DEFAULT_SOURCE",
-                "-D_POSIX_C_SOURCE=200809L",
-                "-DUSE_MIMALLOC=1",
-                "-fstack-protector-strong",
-                "-D_FORTIFY_SOURCE=3",
-                "-fPIE",
-            }
-        else
-            &[_][]const u8{
-                "-std=c23",
-                "-D_DEFAULT_SOURCE",
-                "-D_POSIX_C_SOURCE=200809L",
-                "-DUSE_MIMALLOC=1",
-            }
-    else if (enable_hardening)
-        &[_][]const u8{
-            "-std=c23",
-            "-D_DEFAULT_SOURCE",
-            "-D_POSIX_C_SOURCE=200809L",
-            "-fstack-protector-strong",
-            "-D_FORTIFY_SOURCE=3",
-            "-fPIE",
-        }
-    else
-        &[_][]const u8{
-            "-std=c23",
-            "-D_DEFAULT_SOURCE",
-            "-D_POSIX_C_SOURCE=200809L",
-        };
-    const jsonrpc_files = &[_][]const u8{
-        "src/jsonrpc/arena.c",
-        "src/jsonrpc/jsonrpc.c",
-        "src/jsonrpc/parson.c",
-        "src/jsonrpc/server.c",
-    };
-    const hiredis_files = &[_][]const u8{
-        "src/hiredis/alloc.c",
-        "src/hiredis/async.c",
-        "src/hiredis/dict.c",
-        "src/hiredis/hiredis.c",
-        "src/hiredis/net.c",
-        "src/hiredis/read.c",
-        "src/hiredis/sds.c",
-    };
-    const rabbitmq_files = &[_][]const u8{
-        "src/rabbitmq/amqp_api.c",
-        "src/rabbitmq/amqp_connection.c",
-        "src/rabbitmq/amqp_consumer.c",
-        "src/rabbitmq/amqp_framing.c",
-        "src/rabbitmq/amqp_mem.c",
-        "src/rabbitmq/amqp_openssl.c",
-        "src/rabbitmq/amqp_openssl_bio.c",
-        "src/rabbitmq/amqp_socket.c",
-        "src/rabbitmq/amqp_table.c",
-        "src/rabbitmq/amqp_tcp_socket.c",
-        "src/rabbitmq/amqp_time.c",
-        "src/rabbitmq/amqp_url.c",
-    };
+        no_component_flags;
+
+    const c_flags = makeCFlags(b, &strict_c_flags, c_component_flags, enable_hardening);
+    const ulog_c_flags = makeCFlags(
+        b,
+        &strict_c_flags,
+        &.{"-DULOG_BUILD_DYNAMIC_CONFIG=1"},
+        enable_hardening,
+    );
+    const hiredis_c_flags = makeCFlags(
+        b,
+        &posix_c_flags,
+        hiredis_component_flags,
+        enable_hardening,
+    );
+    const rabbitmq_c_flags = makeCFlags(
+        b,
+        &posix_c_flags,
+        &.{ "-DHAVE_POLL", "-DWC_NO_HARDEN" },
+        enable_hardening,
+    );
+    const jsonrpc_c_flags = makeCFlags(
+        b,
+        &posix_c_flags,
+        jsonrpc_component_flags,
+        enable_hardening,
+    );
 
     var mimalloc_library: ?*std.Build.Step.Compile = null;
     if (mimalloc_dependency) |dependency| {
@@ -263,174 +274,95 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    const lib_module = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .strip = strip_binaries,
-        .link_libc = true,
-        .sanitize_c = sanitize_c,
-    });
-    lib_module.addIncludePath(b.path("include"));
-    lib_module.addCSourceFile(.{ .file = b.path("src/ws_client.c"), .flags = c_flags });
-    lib_module.addCSourceFile(.{ .file = b.path("src/ws_frame.c"), .flags = c_flags });
-    lib_module.addCSourceFile(.{ .file = b.path("src/ws_handshake.c"), .flags = c_flags });
-    lib_module.addCSourceFile(.{ .file = b.path("src/ws_transport.c"), .flags = c_flags });
-
-    const lib = b.addLibrary(.{
+    const websocket_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    addCFiles(b, websocket_module, &.{
+        "src/ws_client.c",
+        "src/ws_frame.c",
+        "src/ws_handshake.c",
+        "src/ws_transport.c",
+    }, c_flags);
+    const websocket_library = b.addLibrary(.{
         .name = "websocket_client",
         .linkage = .static,
-        .root_module = lib_module,
+        .root_module = websocket_module,
     });
-    b.installArtifact(lib);
+    b.installArtifact(websocket_library);
 
-    const monitor_module = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .strip = strip_binaries,
-        .link_libc = true,
-        .sanitize_c = sanitize_c,
-    });
-    monitor_module.addIncludePath(b.path("include"));
-    monitor_module.addCSourceFile(.{ .file = b.path("src/parg.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher_connection.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_publisher_replay.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/subscriber_message.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_config.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/monitor_runtime.c"), .flags = c_flags });
-    monitor_module.addCSourceFile(.{ .file = b.path("src/main.c"), .flags = c_flags });
+    const monitor_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    addCFiles(b, monitor_module, &.{
+        "src/parg.c",
+        "src/toml.c",
+        "src/parson.c",
+        "src/rabbitmq_publisher.c",
+        "src/rabbitmq_publisher_connection.c",
+        "src/rabbitmq_publisher_replay.c",
+        "src/subscriber.c",
+        "src/subscriber_message.c",
+        "src/monitor_config.c",
+        "src/monitor_runtime.c",
+        "src/main.c",
+    }, c_flags);
+    addCFiles(b, monitor_module, &.{"src/ulog.c"}, ulog_c_flags);
+    addCFiles(b, monitor_module, &hiredis_files, hiredis_c_flags);
+    addCFiles(b, monitor_module, &rabbitmq_files, rabbitmq_c_flags);
     if (mimalloc_dependency) |dependency| {
         monitor_module.addIncludePath(dependency.path("include"));
     }
-    for (hiredis_files) |file| {
-        monitor_module.addCSourceFile(.{ .file = b.path(file), .flags = hiredis_c_flags });
-    }
-    for (rabbitmq_files) |file| {
-        monitor_module.addCSourceFile(.{ .file = b.path(file), .flags = rabbitmq_c_flags });
-    }
-
-    const monitor = b.addExecutable(.{
-        .name = "eth_mempool_monitor",
-        .root_module = monitor_module,
-    });
-    if (enable_hardening) {
-        monitor.pie = true;
-        monitor.link_z_relro = true;
-        monitor.link_z_lazy = false;
-    }
-    monitor_module.linkLibrary(lib);
+    monitor_module.linkLibrary(websocket_library);
     monitor_module.linkSystemLibrary("wolfssl", .{});
-    if (mimalloc_library) |library| {
-        monitor_module.linkLibrary(library);
-    }
+    linkOptionalLibrary(monitor_module, mimalloc_library);
 
-    b.installArtifact(monitor);
+    const monitor = addExecutable(b, "eth_mempool_monitor", monitor_module, enable_hardening);
+    addRunStep(b, monitor, "run-example", "Run ETH mempool monitor");
 
-    const run_monitor = b.addRunArtifact(monitor);
-    if (b.args) |args| {
-        run_monitor.addArgs(args);
-    }
-
-    const run_step = b.step("run-example", "Run ETH mempool monitor");
-    run_step.dependOn(&run_monitor.step);
-
-    const rabbitmq_console_module = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .strip = strip_binaries,
-        .link_libc = true,
-        .sanitize_c = sanitize_c,
-    });
-    rabbitmq_console_module.addIncludePath(b.path("include"));
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/parson.c"), .flags = c_flags });
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console.c"), .flags = c_flags });
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console_config.c"), .flags = c_flags });
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console_consumer.c"), .flags = c_flags });
-    rabbitmq_console_module.addCSourceFile(.{ .file = b.path("src/rabbitmq_tx_console_format.c"), .flags = c_flags });
+    const rabbitmq_console_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    addCFiles(b, rabbitmq_console_module, &.{
+        "src/toml.c",
+        "src/parson.c",
+        "src/rabbitmq_tx_console.c",
+        "src/rabbitmq_tx_console_config.c",
+        "src/rabbitmq_tx_console_consumer.c",
+        "src/rabbitmq_tx_console_format.c",
+    }, c_flags);
+    addCFiles(b, rabbitmq_console_module, &.{"src/ulog.c"}, ulog_c_flags);
+    addCFiles(b, rabbitmq_console_module, &rabbitmq_files, rabbitmq_c_flags);
     if (mimalloc_dependency) |dependency| {
         rabbitmq_console_module.addIncludePath(dependency.path("include"));
     }
-    for (rabbitmq_files) |file| {
-        rabbitmq_console_module.addCSourceFile(.{ .file = b.path(file), .flags = rabbitmq_c_flags });
-    }
-
-    const rabbitmq_console = b.addExecutable(.{
-        .name = "rabbitmq_tx_console",
-        .root_module = rabbitmq_console_module,
-    });
-    if (enable_hardening) {
-        rabbitmq_console.pie = true;
-        rabbitmq_console.link_z_relro = true;
-        rabbitmq_console.link_z_lazy = false;
-    }
     rabbitmq_console_module.linkSystemLibrary("wolfssl", .{});
-    if (mimalloc_library) |library| {
-        rabbitmq_console_module.linkLibrary(library);
-    }
-    b.installArtifact(rabbitmq_console);
+    linkOptionalLibrary(rabbitmq_console_module, mimalloc_library);
 
-    const run_rabbitmq_console = b.addRunArtifact(rabbitmq_console);
-    if (b.args) |args| {
-        run_rabbitmq_console.addArgs(args);
-    }
-
-    const run_rabbitmq_console_step = b.step(
+    const rabbitmq_console = addExecutable(
+        b,
+        "rabbitmq_tx_console",
+        rabbitmq_console_module,
+        enable_hardening,
+    );
+    addRunStep(
+        b,
+        rabbitmq_console,
         "run-rabbitmq-console",
         "Run RabbitMQ monitored transaction console",
     );
-    run_rabbitmq_console_step.dependOn(&run_rabbitmq_console.step);
 
-    const rpc_control_module = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .strip = strip_binaries,
-        .link_libc = true,
-        .sanitize_c = sanitize_c,
-    });
-    rpc_control_module.addIncludePath(b.path("include"));
-    rpc_control_module.addCSourceFile(.{ .file = b.path("src/toml.c"), .flags = c_flags });
-    rpc_control_module.addCSourceFile(.{ .file = b.path("src/ulog.c"), .flags = ulog_c_flags });
-    rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control_config.c"), .flags = jsonrpc_c_flags });
-    rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control_service.c"), .flags = jsonrpc_c_flags });
-    rpc_control_module.addCSourceFile(.{ .file = b.path("src/rpc_control.c"), .flags = jsonrpc_c_flags });
+    const rpc_control_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
+    addCFiles(b, rpc_control_module, &.{"src/toml.c"}, c_flags);
+    addCFiles(b, rpc_control_module, &.{"src/ulog.c"}, ulog_c_flags);
+    addCFiles(b, rpc_control_module, &.{
+        "src/rpc_control_config.c",
+        "src/rpc_control_service.c",
+        "src/rpc_control.c",
+    }, jsonrpc_c_flags);
+    addCFiles(b, rpc_control_module, &jsonrpc_files, jsonrpc_c_flags);
+    addCFiles(b, rpc_control_module, &hiredis_files, hiredis_c_flags);
     if (mimalloc_dependency) |dependency| {
         rpc_control_module.addIncludePath(dependency.path("include"));
     }
-    for (jsonrpc_files) |file| {
-        rpc_control_module.addCSourceFile(.{ .file = b.path(file), .flags = jsonrpc_c_flags });
-    }
-    for (hiredis_files) |file| {
-        rpc_control_module.addCSourceFile(.{ .file = b.path(file), .flags = hiredis_c_flags });
-    }
-
-    const rpc_control = b.addExecutable(.{
-        .name = "rpc_control",
-        .root_module = rpc_control_module,
-    });
-    if (enable_hardening) {
-        rpc_control.pie = true;
-        rpc_control.link_z_relro = true;
-        rpc_control.link_z_lazy = false;
-    }
     rpc_control_module.linkSystemLibrary("uv", .{});
-    if (mimalloc_library) |library| {
-        rpc_control_module.linkLibrary(library);
-    }
-    b.installArtifact(rpc_control);
+    linkOptionalLibrary(rpc_control_module, mimalloc_library);
 
-    const run_rpc_control = b.addRunArtifact(rpc_control);
-    if (b.args) |args| {
-        run_rpc_control.addArgs(args);
-    }
-
-    const run_rpc_control_step = b.step("run-rpc-control", "Run JSON-RPC control server");
-    run_rpc_control_step.dependOn(&run_rpc_control.step);
+    const rpc_control = addExecutable(b, "rpc_control", rpc_control_module, enable_hardening);
+    addRunStep(b, rpc_control, "run-rpc-control", "Run JSON-RPC control server");
 
     const valgrind_rpc_control_cmd = b.addSystemCommand(&.{
         "valgrind",

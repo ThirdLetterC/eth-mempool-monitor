@@ -155,6 +155,17 @@ void usage_example() {
 
 ## Project Agent Notes
 
+### Zig Build System (0.16)
+- `build.zig` and `build.zig.zon` target **Zig 0.16.x**. Do not copy build API examples from Zig 0.15 or earlier, and do not downgrade `.minimum_zig_version = "0.16.0"`.
+- CI pins Zig 0.16.0. Before changing build logic, confirm the local toolchain with `zig version`; validate changes with at least `zig build` and `zig build -Dmimalloc=true`.
+- Follow the existing Zig 0.16 target flow: obtain a query with `b.standardTargetOptionsQueryOnly(.{})`, adjust the query when needed, then call `b.resolveTargetQuery(...)`.
+- Define C compilation through `b.createModule(...)`. Put target, optimization, stripping, libc, sanitizers, include paths, C source files, and system-library linkage on the module; create artifacts with `b.addExecutable(...)` or `b.addLibrary(...)` using `.root_module`.
+- Use `b.path(...)` for repository files and `dependency.path(...)` for dependency-owned files. Keep optional dependencies lazy with `b.lazyDependency(...)` so disabled features do not fetch or build them.
+- Preserve the project-specific C flag groups (`c_flags`, `ulog_c_flags`, `hiredis_c_flags`, `rabbitmq_c_flags`, and `jsonrpc_c_flags`). Add each source to the group matching its component rather than creating an unreviewed generic flag set.
+- Keep Linux hardening on the compile artifact (`pie`, `link_z_relro`, and `link_z_lazy`) and preserve sanitizer gating to Debug, non-Windows builds.
+- When adding a runnable artifact, install it with `b.installArtifact(...)`, use `b.addRunArtifact(...)`, forward `b.args`, and expose a named `b.step(...)` consistent with the existing run steps.
+- `build.zig.zon` dependency hashes and the package fingerprint are integrity metadata. Do not edit them manually; use Zig package-management commands when a dependency or package identity genuinely changes.
+
 ### wolfSSL Integration (Critical)
 - When using wolfSSL headers, include `wolfssl/options.h` **before** any `wolfssl/openssl/*` headers.
 - Required order pattern:
