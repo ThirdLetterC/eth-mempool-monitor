@@ -59,7 +59,8 @@ request_timeout_ms = 15000
 max_attempts = 3
 initial_backoff_ms = 500
 max_backoff_ms = 5000
-compression = "none"
+parallel_requests = 1
+compression = "gzip"
 
 [logging]
 level = "info"
