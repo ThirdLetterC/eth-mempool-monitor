@@ -4,13 +4,15 @@
 
 #include <limits.h>
 #include <stdckdint.h>
-#include <stdlib.h>
 #include <string.h>
+
+constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
 
 /*
  * Frame trust boundary:
  * Frame headers and payload lengths are controlled by the remote peer. Every
- * length is validated before conversion, allocation, indexing, or copying.
+ * length is validated before conversion, indexing, or copying. Outbound frames
+ * are masked into a bounded stack buffer to avoid per-frame allocation.
  */
 
 [[nodiscard]] bool ws_frame_send(ws_client_t *client, uint8_t opcode,
@@ -22,71 +24,62 @@
   ulog_trace("[ws-client] send frame opcode=0x%X payload=%zu", (unsigned)opcode,
              payload_length);
 
-  size_t length_field_size = 0;
-  if (payload_length <= 125) {
-    length_field_size = 0;
-  } else if (payload_length <= UINT16_MAX) {
-    length_field_size = 2;
-  } else {
-    length_field_size = 8;
-  }
-
-  size_t frame_overhead = 0;
-  size_t frame_length = 0;
-  if (ckd_add(&frame_overhead, (size_t)6, length_field_size) ||
-      ckd_add(&frame_length, frame_overhead, payload_length)) {
+  if (payload_length > (size_t)INT64_MAX) {
     ws_set_error(client, "Frame payload is too large");
     return false;
   }
 
-  auto frame = (uint8_t *)calloc(frame_length, sizeof(uint8_t));
-  if (frame == nullptr) {
-    ws_set_error(client, "Failed to allocate frame buffer");
-    return false;
-  }
-
+  uint8_t send_buffer[WS_FRAME_SEND_BUFFER_CAPACITY] = {0};
   size_t offset = 0;
-  frame[offset++] = (uint8_t)(0x80U | (opcode & 0x0FU));
+  send_buffer[offset++] = (uint8_t)(0x80U | (opcode & 0x0FU));
 
   if (payload_length <= 125) {
-    frame[offset++] = (uint8_t)(0x80U | (uint8_t)payload_length);
+    send_buffer[offset++] = (uint8_t)(0x80U | (uint8_t)payload_length);
   } else if (payload_length <= UINT16_MAX) {
-    frame[offset++] = (uint8_t)(0x80U | 126U);
-    frame[offset++] = (uint8_t)((payload_length >> 8U) & 0xFFU);
-    frame[offset++] = (uint8_t)(payload_length & 0xFFU);
+    send_buffer[offset++] = (uint8_t)(0x80U | 126U);
+    send_buffer[offset++] = (uint8_t)((payload_length >> 8U) & 0xFFU);
+    send_buffer[offset++] = (uint8_t)(payload_length & 0xFFU);
   } else {
-    frame[offset++] = (uint8_t)(0x80U | 127U);
+    send_buffer[offset++] = (uint8_t)(0x80U | 127U);
     for (size_t shift = 0; shift < 8; ++shift) {
       auto bits = (7U - shift) * 8U;
-      frame[offset++] = (uint8_t)(((uint64_t)payload_length >> bits) & 0xFFU);
+      send_buffer[offset++] =
+          (uint8_t)(((uint64_t)payload_length >> bits) & 0xFFU);
     }
   }
 
   uint8_t mask[4] = {0};
   if (!ws_random_bytes(mask, sizeof(mask))) {
-    free(frame);
     ws_set_error(client, "Failed to generate websocket mask");
     return false;
   }
 
-  memcpy(frame + offset, mask, sizeof(mask));
+  memcpy(send_buffer + offset, mask, sizeof(mask));
   offset += sizeof(mask);
 
-  for (size_t i = 0; i < payload_length; ++i) {
-    auto source = (payload != nullptr) ? payload[i] : 0U;
-    frame[offset + i] = source ^ mask[i % 4];
+  size_t payload_offset = 0;
+  while (true) {
+    size_t available = sizeof(send_buffer) - offset;
+    size_t remaining = payload_length - payload_offset;
+    size_t chunk_length = remaining < available ? remaining : available;
+
+    for (size_t i = 0; i < chunk_length; ++i) {
+      auto source = payload != nullptr ? payload[payload_offset + i] : 0U;
+      send_buffer[offset + i] = source ^ mask[(payload_offset + i) % 4];
+    }
+
+    if (!ws_transport_send_all(client->socket_fd, client->ssl, client->use_tls,
+                               send_buffer, offset + chunk_length)) {
+      ws_set_error(client, "Failed to send frame: %s", strerror(errno));
+      return false;
+    }
+
+    payload_offset += chunk_length;
+    if (payload_offset == payload_length) {
+      return true;
+    }
+    offset = 0;
   }
-
-  auto ok = ws_transport_send_all(client->socket_fd, client->ssl,
-                                  client->use_tls, frame, frame_length);
-  free(frame);
-
-  if (!ok) {
-    ws_set_error(client, "Failed to send frame: %s", strerror(errno));
-    return false;
-  }
-
-  return true;
 }
 
 [[nodiscard]] bool ws_frame_receive(ws_client_t *client,

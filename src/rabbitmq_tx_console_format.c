@@ -2,14 +2,13 @@
 #include "parson/parson.h"
 #include "ulog/ulog.h"
 #include <inttypes.h>
-#include <stdckdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 constexpr uint64_t APP_WEI_PER_GWEI = 1'000'000'000ULL;
 constexpr uint64_t APP_WEI_PER_ETH = 1'000'000'000'000'000'000ULL;
 constexpr size_t APP_MAX_PAYLOAD_BYTES = 1 * 1'024 * 1'024;
+static char app_payload_buffer[APP_MAX_PAYLOAD_BYTES + 1];
 
 /*
  * Transaction-event presentation layer.
@@ -262,42 +261,28 @@ void app_handle_payload(const void *body, size_t body_length) {
     return;
   }
 
-  size_t payload_capacity = 0;
-  if (ckd_add(&payload_capacity, body_length, (size_t)1)) {
-    ulog_error("Out of memory while copying RabbitMQ payload (%zu bytes)\n",
-               body_length);
-    return;
-  }
-
-  char *payload = calloc(payload_capacity, sizeof(char));
-  if (payload == nullptr) {
-    ulog_error("Out of memory while copying RabbitMQ payload (%zu bytes)\n",
-               body_length);
-    return;
-  }
-
+  /* The consumer is single-threaded, so one bounded buffer can be reused. */
   if (body_length > 0) {
-    memcpy(payload, body, body_length);
+    memcpy(app_payload_buffer, body, body_length);
   }
+  app_payload_buffer[body_length] = '\0';
 
-  JSON_Value *root = json_parse_string(payload);
+  JSON_Value *root = json_parse_string(app_payload_buffer);
   if (root == nullptr) {
     ulog_error("Failed to parse RabbitMQ message as JSON (%zu bytes): %s\n",
-               body_length, payload);
-    free(payload);
+               body_length, app_payload_buffer);
     return;
   }
 
   JSON_Object *event = json_value_get_object(root);
   if (event == nullptr) {
-    ulog_error("RabbitMQ message JSON is not an object: %s\n", payload);
+    ulog_error("RabbitMQ message JSON is not an object: %s\n",
+               app_payload_buffer);
     json_value_free(root);
-    free(payload);
     return;
   }
 
   app_print_transaction_summary(event);
 
   json_value_free(root);
-  free(payload);
 }
