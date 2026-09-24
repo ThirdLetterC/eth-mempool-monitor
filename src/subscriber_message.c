@@ -1,6 +1,5 @@
 #include "websocket-client/subscriber_internal.h"
 
-#include "hiredis/hiredis.h"
 #include "parson/parson.h"
 #include "ulog/ulog.h"
 
@@ -257,8 +256,8 @@ static void ws_subscriber_release_pending_tx_lookup(
     return true;
   }
 
-  if (!ws_client_send_text(runtime_config->client, request,
-                           (size_t)request_length)) {
+  if (ws_client_send_text(runtime_config->client, request,
+                          (size_t)request_length) != WS_STATUS_OK) {
     ws_subscriber_release_pending_tx_lookup(runtime_config, lookup);
     ulog_error(
         "eth_getTransactionByHash send failed for hash=%s (id=%" PRIu64 "): %s",
@@ -492,11 +491,15 @@ static void ws_subscriber_publish_transaction_match(
     return;
   }
 
-  bool published = ws_rabbitmq_publisher_publish(
+  auto publish_status = ws_rabbitmq_publisher_publish(
       runtime_config->rabbitmq_publisher, payload, strlen(payload));
-  if (published) {
+  if (publish_status == WS_RABBITMQ_STATUS_OK) {
     ulog_debug("Published monitored transaction %s to RabbitMQ",
                tx_hash != nullptr ? tx_hash : "(unknown)");
+  } else {
+    ulog_error("Failed to queue monitored transaction %s: %s",
+               tx_hash != nullptr ? tx_hash : "(unknown)",
+               ws_rabbitmq_status_string(publish_status));
   }
 
   json_free_serialized_string(payload);

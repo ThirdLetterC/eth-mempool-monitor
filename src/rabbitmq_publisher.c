@@ -74,23 +74,29 @@ ws_rabbitmq_cleanup_worker_resources(ws_rabbitmq_publisher_t *publisher) {
   }
 }
 
-[[nodiscard]] ws_rabbitmq_publisher_t *
-ws_rabbitmq_publisher_create(const ws_rabbitmq_config_t *config) {
-  if (config == nullptr || config->host == nullptr || config->port == 0 ||
-      config->username == nullptr || config->password == nullptr ||
-      config->vhost == nullptr || config->queue == nullptr) {
+[[nodiscard]] ws_rabbitmq_status_t
+ws_rabbitmq_publisher_create(const ws_rabbitmq_config_t *config,
+                             ws_rabbitmq_publisher_t **out_publisher) {
+  if (out_publisher == nullptr) {
+    return WS_RABBITMQ_STATUS_INVALID_ARGUMENT;
+  }
+  *out_publisher = nullptr;
+  if (config == nullptr || config->server.host == nullptr ||
+      config->server.port.value == 0 || config->username == nullptr ||
+      config->password == nullptr || config->vhost == nullptr ||
+      config->queue == nullptr || config->heartbeat.value > UINT16_MAX) {
     ulog_error("Invalid RabbitMQ configuration");
-    return nullptr;
+    return WS_RABBITMQ_STATUS_INVALID_ARGUMENT;
   }
 
   ws_rabbitmq_publisher_t *publisher =
       calloc(1, sizeof(ws_rabbitmq_publisher_t));
   if (publisher == nullptr) {
     ulog_error("Failed to allocate RabbitMQ publisher");
-    return nullptr;
+    return WS_RABBITMQ_STATUS_ALLOCATION_FAILED;
   }
 
-  publisher->host_owned = ws_rabbitmq_string_duplicate(config->host);
+  publisher->host_owned = ws_rabbitmq_string_duplicate(config->server.host);
   publisher->username_owned = ws_rabbitmq_string_duplicate(config->username);
   publisher->password_owned = ws_rabbitmq_string_duplicate(config->password);
   publisher->vhost_owned = ws_rabbitmq_string_duplicate(config->vhost);
@@ -102,7 +108,7 @@ ws_rabbitmq_publisher_create(const ws_rabbitmq_config_t *config) {
     ulog_error("Out of memory while copying RabbitMQ configuration");
     ws_rabbitmq_cleanup_owned_fields(publisher);
     free(publisher);
-    return nullptr;
+    return WS_RABBITMQ_STATUS_ALLOCATION_FAILED;
   }
 
   publisher->host = publisher->host_owned;
@@ -110,13 +116,13 @@ ws_rabbitmq_publisher_create(const ws_rabbitmq_config_t *config) {
   publisher->password = publisher->password_owned;
   publisher->vhost = publisher->vhost_owned;
   publisher->queue = publisher->queue_owned;
-  publisher->port = config->port;
+  publisher->port = config->server.port.value;
   publisher->queue_durable = config->queue_durable;
-  publisher->channel = config->channel != 0
-                           ? config->channel
+  publisher->channel = config->channel.value != 0
+                           ? config->channel.value
                            : (uint16_t)WS_RABBITMQ_DEFAULT_CHANNEL;
-  publisher->heartbeat_seconds = config->heartbeat_seconds != 0
-                                     ? config->heartbeat_seconds
+  publisher->heartbeat_seconds = config->heartbeat.value != 0
+                                     ? (uint16_t)config->heartbeat.value
                                      : WS_RABBITMQ_DEFAULT_HEARTBEAT_SECONDS;
   publisher->queue_bytes = amqp_cstring_bytes(publisher->queue);
   publisher->publish_properties = (amqp_basic_properties_t){0};
@@ -132,28 +138,29 @@ ws_rabbitmq_publisher_create(const ws_rabbitmq_config_t *config) {
     ws_rabbitmq_cleanup_worker_resources(publisher);
     ws_rabbitmq_cleanup_owned_fields(publisher);
     free(publisher);
-    return nullptr;
+    return WS_RABBITMQ_STATUS_WORKER_ERROR;
   }
 
-  return publisher;
+  *out_publisher = publisher;
+  return WS_RABBITMQ_STATUS_OK;
 }
 
-[[nodiscard]] bool
+[[nodiscard]] ws_rabbitmq_status_t
 ws_rabbitmq_publisher_publish(ws_rabbitmq_publisher_t *publisher,
                               const char *payload, size_t payload_length) {
   if (publisher == nullptr || payload == nullptr) {
-    return false;
+    return WS_RABBITMQ_STATUS_INVALID_ARGUMENT;
   }
   if (!ws_rabbitmq_replay_enqueue(publisher, payload, payload_length)) {
-    return false;
+    return WS_RABBITMQ_STATUS_QUEUE_FULL;
   }
   int status = uv_async_send(&publisher->work_async);
   if (status != 0) {
     ulog_error("Failed to signal RabbitMQ publisher worker: %s",
                uv_strerror(status));
-    return false;
+    return WS_RABBITMQ_STATUS_SIGNAL_ERROR;
   }
-  return true;
+  return WS_RABBITMQ_STATUS_OK;
 }
 
 void ws_rabbitmq_publisher_destroy(ws_rabbitmq_publisher_t *publisher) {
@@ -163,4 +170,29 @@ void ws_rabbitmq_publisher_destroy(ws_rabbitmq_publisher_t *publisher) {
   ws_rabbitmq_cleanup_worker_resources(publisher);
   ws_rabbitmq_cleanup_owned_fields(publisher);
   free(publisher);
+}
+
+[[nodiscard]] const char *
+ws_rabbitmq_status_string(ws_rabbitmq_status_t status) {
+  switch (status) {
+  case WS_RABBITMQ_STATUS_OK:
+    return "ok";
+  case WS_RABBITMQ_STATUS_INVALID_ARGUMENT:
+    return "invalid argument";
+  case WS_RABBITMQ_STATUS_ALLOCATION_FAILED:
+    return "allocation failed";
+  case WS_RABBITMQ_STATUS_QUEUE_FULL:
+    return "queue full";
+  case WS_RABBITMQ_STATUS_WORKER_ERROR:
+    return "worker error";
+  case WS_RABBITMQ_STATUS_CONNECTION_ERROR:
+    return "connection error";
+  case WS_RABBITMQ_STATUS_PUBLISH_ERROR:
+    return "publish error";
+  case WS_RABBITMQ_STATUS_CONFIRM_ERROR:
+    return "confirmation error";
+  case WS_RABBITMQ_STATUS_SIGNAL_ERROR:
+    return "signal error";
+  }
+  return "unknown RabbitMQ status";
 }

@@ -6,7 +6,7 @@
  * address validation, and bounded pending lookup state live behind this API.
  */
 
-#include "hiredis/hiredis.h"
+#include "app/hiredis_compat.h"
 #include "websocket-client/rabbitmq_publisher.h"
 #include "websocket-client/ws_client.h"
 
@@ -44,7 +44,7 @@ struct ws_subscriber_runtime_config {
       pending_tx_lookups[WS_SUBSCRIBER_MAX_PENDING_TX_LOOKUPS];
 };
 
-typedef enum {
+typedef enum ws_subscriber_message_action : uint8_t {
   WS_SUBSCRIBER_MESSAGE_ACTION_CONTINUE = 0,
   WS_SUBSCRIBER_MESSAGE_ACTION_RECONNECT = 1,
 } ws_subscriber_message_action_t;

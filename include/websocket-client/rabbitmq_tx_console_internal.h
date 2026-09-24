@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/domain_types.h"
 #include "rabbitmq/amqp.h"
 #include "ulog/ulog.h"
 
@@ -11,19 +12,19 @@
  * Internal console boundary. Configuration owns its *_owned strings; CLI
  * overrides are borrowed argv views and the consumer owns only AMQP handles.
  */
-typedef struct app_config app_config_t;
-struct app_config {
+typedef struct rabbitmq_console_config rabbitmq_console_config_t;
+struct rabbitmq_console_config {
   const char *rabbitmq_host;
-  uint16_t rabbitmq_port;
+  app_port_t rabbitmq_port;
   const char *rabbitmq_username;
   const char *rabbitmq_password;
   const char *rabbitmq_vhost;
   const char *rabbitmq_queue;
   bool rabbitmq_queue_durable;
-  uint16_t rabbitmq_channel;
-  uint16_t rabbitmq_heartbeat_seconds;
-  uint32_t read_timeout_seconds;
-  uint16_t prefetch_count;
+  app_rabbitmq_channel_t rabbitmq_channel;
+  app_seconds_t rabbitmq_heartbeat;
+  app_seconds_t read_timeout;
+  app_prefetch_count_t prefetch_count;
   bool auto_ack;
   ulog_level log_level;
   bool log_color;
@@ -34,8 +35,8 @@ struct app_config {
   char *rabbitmq_queue_owned;
 };
 
-typedef struct app_cli_overrides app_cli_overrides_t;
-struct app_cli_overrides {
+typedef struct rabbitmq_console_cli_overrides rabbitmq_console_cli_overrides_t;
+struct rabbitmq_console_cli_overrides {
   const char *config_path;
   bool config_path_set;
   const char *rabbitmq_host;
@@ -62,24 +63,37 @@ struct app_rabbitmq_consumer {
   bool channel_open;
 };
 
+typedef enum rabbitmq_console_status : uint8_t {
+  RABBITMQ_CONSOLE_STATUS_OK = 0,
+  RABBITMQ_CONSOLE_STATUS_INVALID_CONFIG,
+  RABBITMQ_CONSOLE_STATUS_ALLOCATION_FAILED,
+  RABBITMQ_CONSOLE_STATUS_CONNECTION_ERROR,
+  RABBITMQ_CONSOLE_STATUS_PROTOCOL_ERROR,
+  RABBITMQ_CONSOLE_STATUS_ACK_ERROR,
+} rabbitmq_console_status_t;
+
 extern volatile sig_atomic_t app_shutdown_signal;
 [[nodiscard]] bool app_is_shutdown_requested();
 void app_print_usage(const char *program_name);
-void app_config_set_defaults(app_config_t *config);
-void app_config_cleanup(app_config_t *config);
-[[nodiscard]] bool app_parse_cli(int argc, char *argv[],
-                                 app_cli_overrides_t *overrides);
-[[nodiscard]] bool app_load_toml_config(app_config_t *config,
-                                        const app_cli_overrides_t *overrides);
-[[nodiscard]] bool
-app_apply_cli_overrides(app_config_t *config,
-                        const app_cli_overrides_t *overrides);
+void app_config_set_defaults(rabbitmq_console_config_t *config);
+void app_config_cleanup(rabbitmq_console_config_t *config);
+[[nodiscard]] app_config_status_t
+app_parse_cli(int argc, char *argv[],
+              rabbitmq_console_cli_overrides_t *overrides);
+[[nodiscard]] app_config_status_t
+app_load_toml_config(rabbitmq_console_config_t *config,
+                     const rabbitmq_console_cli_overrides_t *overrides);
+[[nodiscard]] app_config_status_t
+app_apply_cli_overrides(rabbitmq_console_config_t *config,
+                        const rabbitmq_console_cli_overrides_t *overrides);
 [[nodiscard]] bool app_apply_log_level(ulog_level level);
 [[nodiscard]] bool app_apply_log_color(bool enabled);
 [[nodiscard]] bool app_apply_log_style_defaults();
-[[nodiscard]] bool app_rabbitmq_connect(const app_config_t *config,
-                                        app_rabbitmq_consumer_t *consumer);
+[[nodiscard]] rabbitmq_console_status_t
+app_rabbitmq_connect(const rabbitmq_console_config_t *config,
+                     app_rabbitmq_consumer_t *consumer);
 void app_rabbitmq_disconnect(app_rabbitmq_consumer_t *consumer);
-[[nodiscard]] bool app_consume_loop(app_rabbitmq_consumer_t *consumer,
-                                    const app_config_t *config);
+[[nodiscard]] rabbitmq_console_status_t
+app_consume_loop(app_rabbitmq_consumer_t *consumer,
+                 const rabbitmq_console_config_t *config);
 void app_handle_payload(const void *body, size_t body_length);

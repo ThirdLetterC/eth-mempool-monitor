@@ -92,61 +92,62 @@ void app_rabbitmq_disconnect(app_rabbitmq_consumer_t *consumer) {
   consumer->connection = nullptr;
 }
 
-[[nodiscard]] bool app_rabbitmq_connect(const app_config_t *config,
-                                        app_rabbitmq_consumer_t *consumer) {
+[[nodiscard]] rabbitmq_console_status_t
+app_rabbitmq_connect(const rabbitmq_console_config_t *config,
+                     app_rabbitmq_consumer_t *consumer) {
   if (config == nullptr || consumer == nullptr ||
-      config->rabbitmq_host == nullptr || config->rabbitmq_port == 0 ||
+      config->rabbitmq_host == nullptr || config->rabbitmq_port.value == 0 ||
       config->rabbitmq_username == nullptr ||
       config->rabbitmq_password == nullptr ||
       config->rabbitmq_vhost == nullptr || config->rabbitmq_queue == nullptr ||
-      config->rabbitmq_channel == 0 ||
-      config->rabbitmq_heartbeat_seconds == 0) {
+      config->rabbitmq_channel.value == 0 ||
+      config->rabbitmq_heartbeat.value == 0) {
     ulog_error("Invalid RabbitMQ configuration\n");
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_INVALID_CONFIG;
   }
 
   *consumer = (app_rabbitmq_consumer_t){
-      .channel = (amqp_channel_t)config->rabbitmq_channel,
+      .channel = (amqp_channel_t)config->rabbitmq_channel.value,
   };
 
   consumer->connection = amqp_new_connection();
   if (consumer->connection == nullptr) {
     ulog_error("Failed to create RabbitMQ connection object\n");
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_ALLOCATION_FAILED;
   }
 
   amqp_socket_t *socket = amqp_tcp_socket_new(consumer->connection);
   if (socket == nullptr) {
     ulog_error("Failed to create RabbitMQ TCP socket\n");
     app_rabbitmq_disconnect(consumer);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_ALLOCATION_FAILED;
   }
 
   int socket_status = amqp_socket_open(socket, config->rabbitmq_host,
-                                       (int)config->rabbitmq_port);
+                                       (int)config->rabbitmq_port.value);
   if (socket_status != AMQP_STATUS_OK) {
     ulog_error("Failed to connect to RabbitMQ at %s:%u: %s\n",
-               config->rabbitmq_host, config->rabbitmq_port,
+               config->rabbitmq_host, (unsigned)config->rabbitmq_port.value,
                amqp_error_string2(socket_status));
     app_rabbitmq_disconnect(consumer);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_CONNECTION_ERROR;
   }
 
   amqp_rpc_reply_t login_reply = amqp_login(
       consumer->connection, config->rabbitmq_vhost, 0, AMQP_DEFAULT_FRAME_SIZE,
-      (int)config->rabbitmq_heartbeat_seconds, AMQP_SASL_METHOD_PLAIN,
+      (int)config->rabbitmq_heartbeat.value, AMQP_SASL_METHOD_PLAIN,
       config->rabbitmq_username, config->rabbitmq_password);
   if (login_reply.reply_type != AMQP_RESPONSE_NORMAL) {
     app_log_rpc_failure("login", login_reply);
     app_rabbitmq_disconnect(consumer);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_CONNECTION_ERROR;
   }
   consumer->logged_in = true;
 
   if (amqp_channel_open(consumer->connection, consumer->channel) == nullptr ||
       !app_expect_normal_reply(consumer->connection, "channel open")) {
     app_rabbitmq_disconnect(consumer);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_PROTOCOL_ERROR;
   }
   consumer->channel_open = true;
 
@@ -157,17 +158,17 @@ void app_rabbitmq_disconnect(app_rabbitmq_consumer_t *consumer) {
   if (queue_declare_ok == nullptr ||
       !app_expect_normal_reply(consumer->connection, "queue declare")) {
     app_rabbitmq_disconnect(consumer);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_PROTOCOL_ERROR;
   }
 
-  if (config->prefetch_count > 0) {
+  if (config->prefetch_count.value > 0) {
     amqp_basic_qos_ok_t *qos_ok =
         amqp_basic_qos(consumer->connection, consumer->channel, 0,
-                       config->prefetch_count, false);
+                       config->prefetch_count.value, false);
     if (qos_ok == nullptr ||
         !app_expect_normal_reply(consumer->connection, "basic.qos")) {
       app_rabbitmq_disconnect(consumer);
-      return false;
+      return RABBITMQ_CONSOLE_STATUS_PROTOCOL_ERROR;
     }
   }
 
@@ -177,28 +178,30 @@ void app_rabbitmq_disconnect(app_rabbitmq_consumer_t *consumer) {
   if (consume_ok == nullptr ||
       !app_expect_normal_reply(consumer->connection, "basic.consume")) {
     app_rabbitmq_disconnect(consumer);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_PROTOCOL_ERROR;
   }
 
-  ulog_info(
-      "Connected to RabbitMQ at %s:%u (queue=%s durable=%s prefetch=%u "
-      "auto_ack=%s)",
-      config->rabbitmq_host, config->rabbitmq_port, config->rabbitmq_queue,
-      config->rabbitmq_queue_durable ? "true" : "false",
-      (unsigned)config->prefetch_count, config->auto_ack ? "true" : "false");
+  ulog_info("Connected to RabbitMQ at %s:%u (queue=%s durable=%s prefetch=%u "
+            "auto_ack=%s)",
+            config->rabbitmq_host, (unsigned)config->rabbitmq_port.value,
+            config->rabbitmq_queue,
+            config->rabbitmq_queue_durable ? "true" : "false",
+            (unsigned)config->prefetch_count.value,
+            config->auto_ack ? "true" : "false");
 
-  return true;
+  return RABBITMQ_CONSOLE_STATUS_OK;
 }
 
-[[nodiscard]] bool app_consume_loop(app_rabbitmq_consumer_t *consumer,
-                                    const app_config_t *config) {
+[[nodiscard]] rabbitmq_console_status_t
+app_consume_loop(app_rabbitmq_consumer_t *consumer,
+                 const rabbitmq_console_config_t *config) {
   if (consumer == nullptr || config == nullptr ||
       consumer->connection == nullptr) {
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_INVALID_CONFIG;
   }
 
   struct timeval timeout = {
-      .tv_sec = (time_t)config->read_timeout_seconds,
+      .tv_sec = (time_t)config->read_timeout.value,
       .tv_usec = 0,
   };
 
@@ -219,7 +222,7 @@ void app_rabbitmq_disconnect(app_rabbitmq_consumer_t *consumer) {
           ulog_error("RabbitMQ ack failed: %s\n",
                      amqp_error_string2(ack_status));
           amqp_destroy_envelope(&envelope);
-          return false;
+          return RABBITMQ_CONSOLE_STATUS_ACK_ERROR;
         }
       }
 
@@ -233,8 +236,8 @@ void app_rabbitmq_disconnect(app_rabbitmq_consumer_t *consumer) {
     }
 
     app_log_rpc_failure("consume message", reply);
-    return false;
+    return RABBITMQ_CONSOLE_STATUS_PROTOCOL_ERROR;
   }
 
-  return true;
+  return RABBITMQ_CONSOLE_STATUS_OK;
 }

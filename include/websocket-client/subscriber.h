@@ -5,76 +5,45 @@
 
 #include <stdint.h>
 
-/**
- * @brief Continuously listens for text frames and processes subscription
- * messages.
- * @return false when receive fails or the connection is closed.
- */
-[[nodiscard]] bool ws_subscriber_listen(ws_client_t *client);
-
 typedef bool (*ws_subscriber_stop_check_fn)();
 
 typedef struct ws_subscriber_redis_config ws_subscriber_redis_config_t;
 struct ws_subscriber_redis_config {
-  const char *host;
-  uint16_t port;
+  app_tcp_endpoint_t server;
   const char *monitored_set_key;
 };
 
-/**
- * @brief Sets a callback used to check whether subscriber loops should stop.
- */
-void ws_subscriber_set_stop_check(ws_subscriber_stop_check_fn stop_check);
+typedef enum ws_subscriber_status : uint8_t {
+  WS_SUBSCRIBER_STATUS_OK = 0,
+  WS_SUBSCRIBER_STATUS_STOPPED,
+  WS_SUBSCRIBER_STATUS_INVALID_CONFIG,
+  WS_SUBSCRIBER_STATUS_REDIS_ERROR,
+  WS_SUBSCRIBER_STATUS_RABBITMQ_ERROR,
+  WS_SUBSCRIBER_STATUS_WEBSOCKET_ERROR,
+  WS_SUBSCRIBER_STATUS_RECONNECT_REQUIRED,
+} ws_subscriber_status_t;
+
+static_assert(sizeof(ws_subscriber_status_t) == sizeof(uint8_t));
+
+typedef struct {
+  ws_endpoint_t websocket;
+  ws_timeouts_t timeouts;
+  const char *subscribe_request;
+  const ws_subscriber_redis_config_t *redis;
+  const ws_rabbitmq_config_t *rabbitmq;
+  ws_subscriber_stop_check_fn should_stop;
+} ws_subscriber_options_t;
 
 /**
- * @brief Connects over wss://, sends a subscription request, then starts
- * listening.
- * @return false on setup or receive failure.
+ * @brief Runs one fully configured subscription attempt.
+ * Optional integration pointers and the stop callback are borrowed for the
+ * duration of the call.
  */
-[[nodiscard]] bool ws_subscriber_run(const char *host, uint16_t port,
-                                     const char *path,
-                                     const char *subscribe_request);
+[[nodiscard]] ws_subscriber_status_t
+ws_subscriber_run(const ws_subscriber_options_t *options);
 
-/**
- * @brief Connects over ws:// or wss://, sends a subscription request, then
- * starts listening.
- * @return false on setup or receive failure.
- */
-[[nodiscard]] bool ws_subscriber_run_ex(const char *host, uint16_t port,
-                                        const char *path,
-                                        const char *subscribe_request,
-                                        bool secure);
+[[nodiscard]] bool
+ws_subscriber_status_is_retryable(ws_subscriber_status_t status);
 
-/**
- * @brief Connects to websocket endpoint, checks tx addresses against Redis,
- * then listens.
- * @return false on setup or receive failure.
- */
-[[nodiscard]] bool ws_subscriber_run_ex_with_redis(
-    const char *host, uint16_t port, const char *path,
-    const char *subscribe_request, bool secure,
-    const ws_subscriber_redis_config_t *redis_config);
-
-/**
- * @brief Connects to websocket endpoint, checks tx addresses against Redis,
- * publishes matches to RabbitMQ.
- * @return false on setup or receive failure.
- */
-[[nodiscard]] bool ws_subscriber_run_ex_with_integrations(
-    const char *host, uint16_t port, const char *path,
-    const char *subscribe_request, bool secure,
-    const ws_subscriber_redis_config_t *redis_config,
-    const ws_rabbitmq_config_t *rabbitmq_config);
-
-/**
- * @brief Same as ws_subscriber_run_ex_with_integrations but overrides websocket
- * socket timeouts.
- * @param read_timeout_seconds socket receive timeout in seconds (must be >0).
- * @param write_timeout_seconds socket send timeout in seconds (must be >0).
- */
-[[nodiscard]] bool ws_subscriber_run_ex_with_integrations_and_timeouts(
-    const char *host, uint16_t port, const char *path,
-    const char *subscribe_request, bool secure,
-    const ws_subscriber_redis_config_t *redis_config,
-    const ws_rabbitmq_config_t *rabbitmq_config, uint32_t read_timeout_seconds,
-    uint32_t write_timeout_seconds);
+[[nodiscard]] const char *
+ws_subscriber_status_string(ws_subscriber_status_t status);

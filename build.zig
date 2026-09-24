@@ -10,6 +10,15 @@ const strict_c_flags = [_][]const u8{
     "-Werror",
 };
 
+const conversion_c_flags = [_][]const u8{
+    "-Wconversion",
+    "-Wsign-conversion",
+    "-Wenum-conversion",
+    "-Wimplicit-int-conversion",
+};
+
+const first_party_c_flags = strict_c_flags ++ conversion_c_flags;
+
 const posix_c_flags = [_][]const u8{
     "-std=c23",
     "-D_DEFAULT_SOURCE",
@@ -229,9 +238,15 @@ pub fn build(b: *std.Build) void {
         no_component_flags;
 
     const c_flags = makeCFlags(b, &strict_c_flags, c_component_flags, enable_hardening);
+    const project_c_flags = makeCFlags(
+        b,
+        &first_party_c_flags,
+        c_component_flags,
+        enable_hardening,
+    );
     const project_posix_c_flags = makeCFlags(
         b,
-        &strict_c_flags,
+        &first_party_c_flags,
         project_posix_component_flags,
         enable_hardening,
     );
@@ -294,7 +309,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const websocket_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
-    addCFiles(b, websocket_module, &.{"src/ws_frame.c"}, c_flags);
+    addCFiles(b, websocket_module, &.{"src/ws_frame.c"}, project_c_flags);
     addCFiles(b, websocket_module, &.{
         "src/ws_client.c",
         "src/ws_handshake.c",
@@ -307,15 +322,41 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(websocket_library);
 
+    const type_test_module = createCModule(
+        b,
+        target,
+        .Debug,
+        false,
+        sanitize_c,
+    );
+    addCFiles(
+        b,
+        type_test_module,
+        &.{"tests/type_safety_test.c"},
+        project_c_flags,
+    );
+    addCFiles(b, type_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    type_test_module.linkLibrary(websocket_library);
+    type_test_module.linkSystemLibrary("wolfssl", .{});
+    const type_test = b.addExecutable(.{
+        .name = "type_safety_test",
+        .root_module = type_test_module,
+    });
+    const run_type_test = b.addRunArtifact(type_test);
+    const test_step = b.step("test", "Run first-party C type-safety tests");
+    test_step.dependOn(&run_type_test.step);
+
     const monitor_module = createCModule(b, target, optimize, strip_binaries, sanitize_c);
     addCFiles(b, monitor_module, &.{
         "src/parg.c",
         "src/toml.c",
         "src/parson.c",
+    }, c_flags);
+    addCFiles(b, monitor_module, &.{
         "src/subscriber.c",
         "src/subscriber_message.c",
         "src/main.c",
-    }, c_flags);
+    }, project_c_flags);
     addCFiles(b, monitor_module, &.{
         "src/monitor_config.c",
         "src/monitor_runtime.c",
@@ -342,8 +383,10 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, rabbitmq_console_module, &.{
         "src/toml.c",
         "src/parson.c",
-        "src/rabbitmq_tx_console_format.c",
     }, c_flags);
+    addCFiles(b, rabbitmq_console_module, &.{
+        "src/rabbitmq_tx_console_format.c",
+    }, project_c_flags);
     addCFiles(b, rabbitmq_console_module, &.{
         "src/rabbitmq_tx_console.c",
         "src/rabbitmq_tx_console_config.c",
@@ -377,7 +420,7 @@ pub fn build(b: *std.Build) void {
         "src/rpc_control_config.c",
         "src/rpc_control_service.c",
         "src/rpc_control.c",
-    }, jsonrpc_c_flags);
+    }, project_posix_c_flags);
     addCFiles(b, rpc_control_module, &jsonrpc_files, jsonrpc_c_flags);
     addCFiles(b, rpc_control_module, &hiredis_files, hiredis_c_flags);
     if (mimalloc_dependency) |dependency| {

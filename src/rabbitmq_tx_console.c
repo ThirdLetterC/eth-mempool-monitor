@@ -78,8 +78,8 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  app_cli_overrides_t overrides = {0};
-  if (!app_parse_cli(argc, argv, &overrides)) {
+  rabbitmq_console_cli_overrides_t overrides = {0};
+  if (app_parse_cli(argc, argv, &overrides) != APP_CONFIG_STATUS_OK) {
     app_print_usage(argv[0]);
     return EXIT_FAILURE;
   }
@@ -88,11 +88,12 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
   }
 
-  app_config_t config = {0};
+  rabbitmq_console_config_t config = {0};
   app_config_set_defaults(&config);
 
-  bool ok = app_load_toml_config(&config, &overrides);
-  ok = ok && app_apply_cli_overrides(&config, &overrides);
+  bool ok = app_load_toml_config(&config, &overrides) == APP_CONFIG_STATUS_OK;
+  ok = ok &&
+       app_apply_cli_overrides(&config, &overrides) == APP_CONFIG_STATUS_OK;
   if (!ok) {
     app_config_cleanup(&config);
     return EXIT_FAILURE;
@@ -116,23 +117,23 @@ int main(int argc, char *argv[]) {
   ulog_info("Starting RabbitMQ transaction console");
   ulog_info("RabbitMQ endpoint: %s:%u vhost=%s queue=%s durable=%s channel=%u "
             "heartbeat=%u sec",
-            config.rabbitmq_host, config.rabbitmq_port, config.rabbitmq_vhost,
-            config.rabbitmq_queue,
+            config.rabbitmq_host, (unsigned)config.rabbitmq_port.value,
+            config.rabbitmq_vhost, config.rabbitmq_queue,
             config.rabbitmq_queue_durable ? "true" : "false",
-            (unsigned)config.rabbitmq_channel,
-            (unsigned)config.rabbitmq_heartbeat_seconds);
+            (unsigned)config.rabbitmq_channel.value,
+            (unsigned)config.rabbitmq_heartbeat.value);
   ulog_info("Consumer settings: timeout=%u sec prefetch=%u auto_ack=%s",
-            (unsigned)config.read_timeout_seconds,
-            (unsigned)config.prefetch_count,
+            (unsigned)config.read_timeout.value,
+            (unsigned)config.prefetch_count.value,
             config.auto_ack ? "true" : "false");
 
   app_rabbitmq_consumer_t consumer = {0};
-  if (!app_rabbitmq_connect(&config, &consumer)) {
+  if (app_rabbitmq_connect(&config, &consumer) != RABBITMQ_CONSOLE_STATUS_OK) {
     app_config_cleanup(&config);
     return EXIT_FAILURE;
   }
 
-  ok = app_consume_loop(&consumer, &config);
+  ok = app_consume_loop(&consumer, &config) == RABBITMQ_CONSOLE_STATUS_OK;
 
   app_rabbitmq_disconnect(&consumer);
   app_config_cleanup(&config);

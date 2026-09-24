@@ -138,10 +138,12 @@ void ws_transport_set_read_error(ws_client_t *client, const char *context,
 #endif
 }
 
-[[nodiscard]] bool ws_transport_read_exact(ws_client_t *client, uint8_t *buffer,
-                                           size_t length, const char *context) {
+[[nodiscard]] ws_status_t ws_transport_read_exact(ws_client_t *client,
+                                                  uint8_t *buffer,
+                                                  size_t length,
+                                                  const char *context) {
   if (client == nullptr || buffer == nullptr || context == nullptr) {
-    return false;
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
   ulog_trace("[ws-client] read_exact context=\"%s\" bytes=%zu", context,
@@ -155,17 +157,21 @@ void ws_transport_set_read_error(ws_client_t *client, const char *context,
       ws_transport_set_read_error(client, context, received, client->ssl,
                                   client->use_tls,
                                   client->read_timeout_seconds);
-      return false;
+      return received == 0 ? WS_STATUS_PEER_CLOSED : WS_STATUS_TRANSPORT_ERROR;
     }
     total += (size_t)received;
   }
   ulog_trace("[ws-client] read_exact complete context=\"%s\" bytes=%zu",
              context, length);
-  return true;
+  return WS_STATUS_OK;
 }
 
-[[nodiscard]] bool ws_transport_send_all(int fd, SSL *ssl, bool use_tls,
-                                         const uint8_t *buffer, size_t length) {
+[[nodiscard]] ws_status_t ws_transport_send_all(int fd, SSL *ssl, bool use_tls,
+                                                const uint8_t *buffer,
+                                                size_t length) {
+  if (fd < 0 || (buffer == nullptr && length != 0)) {
+    return WS_STATUS_INVALID_ARGUMENT;
+  }
   ulog_trace("[ws-client] send_all tls=%s bytes=%zu",
              use_tls ? "true" : "false", length);
   size_t total = 0;
@@ -173,29 +179,31 @@ void ws_transport_set_read_error(ws_client_t *client, const char *context,
     auto sent =
         ws_transport_send(fd, ssl, use_tls, buffer + total, length - total);
     if (sent <= 0) {
-      return false;
+      return WS_STATUS_TRANSPORT_ERROR;
     }
     total += (size_t)sent;
   }
   ulog_trace("[ws-client] send_all complete bytes=%zu", length);
-  return true;
+  return WS_STATUS_OK;
 }
 
-[[nodiscard]] bool ws_transport_discard(ws_client_t *client, uint64_t length,
-                                        const char *context) {
+[[nodiscard]] ws_status_t ws_transport_discard(ws_client_t *client,
+                                               uint64_t length,
+                                               const char *context) {
   uint8_t scratch[512] = {0};
   auto remaining = length;
 
   while (remaining > 0) {
     auto chunk =
         (remaining > sizeof(scratch)) ? sizeof(scratch) : (size_t)remaining;
-    if (!ws_transport_read_exact(client, scratch, chunk, context)) {
-      return false;
+    auto status = ws_transport_read_exact(client, scratch, chunk, context);
+    if (status != WS_STATUS_OK) {
+      return status;
     }
     remaining -= chunk;
   }
 
-  return true;
+  return WS_STATUS_OK;
 }
 
 [[nodiscard]] bool ws_random_bytes(uint8_t *buffer, size_t length) {

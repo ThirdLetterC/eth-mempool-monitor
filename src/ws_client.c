@@ -16,10 +16,15 @@ constexpr uint32_t WS_DEFAULT_WRITE_TIMEOUT_SECONDS = 5;
  * delegates untrusted network processing to the handshake and frame modules.
  */
 
-[[nodiscard]] ws_client_t *ws_client_create() {
+[[nodiscard]] ws_status_t ws_client_create(ws_client_t **out_client) {
+  if (out_client == nullptr) {
+    return WS_STATUS_INVALID_ARGUMENT;
+  }
+  *out_client = nullptr;
+
   auto client = (ws_client_t *)calloc(1, sizeof(ws_client_t));
   if (client == nullptr) {
-    return nullptr;
+    return WS_STATUS_ALLOCATION_FAILED;
   }
 
   client->socket_fd = -1;
@@ -30,7 +35,8 @@ constexpr uint32_t WS_DEFAULT_WRITE_TIMEOUT_SECONDS = 5;
   client->ssl_ctx = nullptr;
   client->ssl = nullptr;
   client->last_error[0] = '\0';
-  return client;
+  *out_client = client;
+  return WS_STATUS_OK;
 }
 
 void ws_client_destroy(ws_client_t *client) {
@@ -46,68 +52,63 @@ void ws_client_destroy(ws_client_t *client) {
   free(client);
 }
 
-[[nodiscard]] bool ws_client_set_timeouts(ws_client_t *client,
-                                          uint32_t read_timeout_seconds,
-                                          uint32_t write_timeout_seconds) {
-  if (client == nullptr || read_timeout_seconds == 0 ||
-      write_timeout_seconds == 0 || read_timeout_seconds > (uint32_t)INT_MAX ||
-      write_timeout_seconds > (uint32_t)INT_MAX) {
-    return false;
+[[nodiscard]] ws_status_t ws_client_set_timeouts(ws_client_t *client,
+                                                 ws_timeouts_t timeouts) {
+  if (client == nullptr || timeouts.read.value == 0 ||
+      timeouts.write.value == 0 || timeouts.read.value > (uint32_t)INT_MAX ||
+      timeouts.write.value > (uint32_t)INT_MAX) {
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
-  client->read_timeout_seconds = read_timeout_seconds;
-  client->write_timeout_seconds = write_timeout_seconds;
-  return true;
+  client->read_timeout_seconds = timeouts.read.value;
+  client->write_timeout_seconds = timeouts.write.value;
+  return WS_STATUS_OK;
 }
 
-[[nodiscard]] bool ws_client_connect(ws_client_t *client, const char *host,
-                                     uint16_t port, const char *path) {
-  return ws_handshake_connect(client, host, port, path, false);
+[[nodiscard]] ws_status_t ws_client_connect(ws_client_t *client,
+                                            const ws_endpoint_t *endpoint) {
+  return ws_handshake_connect(client, endpoint);
 }
 
-[[nodiscard]] bool ws_client_connect_secure(ws_client_t *client,
-                                            const char *host, uint16_t port,
-                                            const char *path) {
-  return ws_handshake_connect(client, host, port, path, true);
-}
-
-[[nodiscard]] bool ws_client_send_text(ws_client_t *client, const char *text,
-                                       size_t length) {
+[[nodiscard]] ws_status_t ws_client_send_text(ws_client_t *client,
+                                              const char *text, size_t length) {
   if (client == nullptr || text == nullptr) {
-    return false;
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
-  return ws_frame_send(client, 0x1U, (const uint8_t *)text, length);
+  return ws_frame_send(client, WS_OPCODE_TEXT, (const uint8_t *)text, length);
 }
 
-[[nodiscard]] bool ws_client_send_binary(ws_client_t *client,
-                                         const uint8_t *data, size_t length) {
+[[nodiscard]] ws_status_t
+ws_client_send_binary(ws_client_t *client, const uint8_t *data, size_t length) {
   if (client == nullptr || data == nullptr) {
-    return false;
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
-  return ws_frame_send(client, 0x2U, data, length);
+  return ws_frame_send(client, WS_OPCODE_BINARY, data, length);
 }
 
-[[nodiscard]] bool ws_client_receive_text(ws_client_t *client, char *buffer,
-                                          size_t capacity, size_t *out_length) {
+[[nodiscard]] ws_status_t ws_client_receive_text(ws_client_t *client,
+                                                 char *buffer, size_t capacity,
+                                                 size_t *out_length) {
   if (client == nullptr || buffer == nullptr || capacity == 0) {
-    return false;
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
-  return ws_frame_receive(client, 0x1U, "text", (uint8_t *)buffer, capacity,
+  return ws_frame_receive(client, WS_OPCODE_TEXT, (uint8_t *)buffer, capacity,
                           out_length, true);
 }
 
-[[nodiscard]] bool ws_client_receive_binary(ws_client_t *client,
-                                            uint8_t *buffer, size_t capacity,
-                                            size_t *out_length) {
+[[nodiscard]] ws_status_t ws_client_receive_binary(ws_client_t *client,
+                                                   uint8_t *buffer,
+                                                   size_t capacity,
+                                                   size_t *out_length) {
   if (client == nullptr || buffer == nullptr || capacity == 0) {
-    return false;
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
-  return ws_frame_receive(client, 0x2U, "binary", buffer, capacity, out_length,
-                          false);
+  return ws_frame_receive(client, WS_OPCODE_BINARY, buffer, capacity,
+                          out_length, false);
 }
 
 void ws_client_close(ws_client_t *client) {
@@ -117,7 +118,7 @@ void ws_client_close(ws_client_t *client) {
 
   ulog_debug("[ws-client] closing websocket connection fd=%d tls=%s",
              client->socket_fd, client->use_tls ? "true" : "false");
-  (void)ws_frame_send(client, 0x8U, nullptr, 0);
+  (void)ws_frame_send(client, WS_OPCODE_CLOSE, nullptr, 0);
   if (client->ssl != nullptr) {
     (void)SSL_shutdown(client->ssl);
     SSL_free(client->ssl);
@@ -140,4 +141,27 @@ void ws_client_close(ws_client_t *client) {
   }
 
   return client->last_error;
+}
+
+[[nodiscard]] const char *ws_status_string(ws_status_t status) {
+  switch (status) {
+  case WS_STATUS_OK:
+    return "ok";
+  case WS_STATUS_INVALID_ARGUMENT:
+    return "invalid argument";
+  case WS_STATUS_INVALID_STATE:
+    return "invalid state";
+  case WS_STATUS_ALLOCATION_FAILED:
+    return "allocation failed";
+  case WS_STATUS_TRANSPORT_ERROR:
+    return "transport error";
+  case WS_STATUS_TLS_ERROR:
+    return "TLS error";
+  case WS_STATUS_PROTOCOL_ERROR:
+    return "protocol error";
+  case WS_STATUS_PEER_CLOSED:
+    return "peer closed";
+  case WS_STATUS_BUFFER_TOO_SMALL:
+    return "buffer too small";
+  }
 }

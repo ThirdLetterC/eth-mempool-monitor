@@ -109,29 +109,33 @@ void app_print_usage(const char *program_name) {
   return true;
 }
 
-void app_config_set_defaults(app_config_t *config) {
+void app_config_set_defaults(rabbitmq_console_config_t *config) {
   if (config == nullptr) {
     return;
   }
 
   config->rabbitmq_host = APP_DEFAULT_RABBITMQ_HOST;
-  config->rabbitmq_port = APP_DEFAULT_RABBITMQ_PORT;
+  config->rabbitmq_port = (app_port_t){.value = APP_DEFAULT_RABBITMQ_PORT};
   config->rabbitmq_username = APP_DEFAULT_RABBITMQ_USERNAME;
   config->rabbitmq_password = APP_DEFAULT_RABBITMQ_PASSWORD;
   config->rabbitmq_vhost = APP_DEFAULT_RABBITMQ_VHOST;
   config->rabbitmq_queue = APP_DEFAULT_RABBITMQ_QUEUE;
   config->rabbitmq_queue_durable = APP_DEFAULT_RABBITMQ_QUEUE_DURABLE;
-  config->rabbitmq_channel = APP_DEFAULT_RABBITMQ_CHANNEL;
-  config->rabbitmq_heartbeat_seconds = APP_DEFAULT_RABBITMQ_HEARTBEAT_SECONDS;
+  config->rabbitmq_channel =
+      (app_rabbitmq_channel_t){.value = APP_DEFAULT_RABBITMQ_CHANNEL};
+  config->rabbitmq_heartbeat =
+      (app_seconds_t){.value = APP_DEFAULT_RABBITMQ_HEARTBEAT_SECONDS};
 
-  config->read_timeout_seconds = APP_DEFAULT_READ_TIMEOUT_SECONDS;
-  config->prefetch_count = APP_DEFAULT_PREFETCH_COUNT;
+  config->read_timeout =
+      (app_seconds_t){.value = APP_DEFAULT_READ_TIMEOUT_SECONDS};
+  config->prefetch_count =
+      (app_prefetch_count_t){.value = APP_DEFAULT_PREFETCH_COUNT};
   config->auto_ack = APP_DEFAULT_AUTO_ACK;
   config->log_level = APP_DEFAULT_LOG_LEVEL;
   config->log_color = APP_DEFAULT_LOG_COLOR;
 }
 
-void app_config_cleanup(app_config_t *config) {
+void app_config_cleanup(rabbitmq_console_config_t *config) {
   if (config == nullptr) {
     return;
   }
@@ -290,8 +294,9 @@ void app_config_cleanup(app_config_t *config) {
 }
 
 /* Load the optional TOML layer over defaults; CLI remains higher priority. */
-[[nodiscard]] bool app_load_toml_config(app_config_t *config,
-                                        const app_cli_overrides_t *overrides) {
+[[nodiscard]] static bool
+app_load_toml_config_impl(rabbitmq_console_config_t *config,
+                          const rabbitmq_console_cli_overrides_t *overrides) {
   if (config == nullptr || overrides == nullptr) {
     return false;
   }
@@ -343,7 +348,7 @@ void app_config_cleanup(app_config_t *config) {
           "Config key 'rabbitmq.port' must be an integer in range 1..65535\n");
       ok = false;
     } else {
-      config->rabbitmq_port = (uint16_t)rabbitmq_port.u.int64;
+      config->rabbitmq_port.value = (uint16_t)rabbitmq_port.u.int64;
     }
   }
 
@@ -366,7 +371,7 @@ void app_config_cleanup(app_config_t *config) {
                  "range 1..65535\n");
       ok = false;
     } else {
-      config->rabbitmq_channel = (uint16_t)rabbitmq_channel.u.int64;
+      config->rabbitmq_channel.value = (uint16_t)rabbitmq_channel.u.int64;
     }
   }
 
@@ -380,7 +385,7 @@ void app_config_cleanup(app_config_t *config) {
                  "integer in range 1..65535\n");
       ok = false;
     } else {
-      config->rabbitmq_heartbeat_seconds =
+      config->rabbitmq_heartbeat.value =
           (uint16_t)rabbitmq_heartbeat_seconds.u.int64;
     }
   }
@@ -397,7 +402,7 @@ void app_config_cleanup(app_config_t *config) {
           INT_MAX);
       ok = false;
     } else {
-      config->read_timeout_seconds = (uint32_t)read_timeout_seconds.u.int64;
+      config->read_timeout.value = (uint32_t)read_timeout_seconds.u.int64;
     }
   }
 
@@ -410,7 +415,7 @@ void app_config_cleanup(app_config_t *config) {
                  "an integer in range 0..65535\n");
       ok = false;
     } else {
-      config->prefetch_count = (uint16_t)prefetch_count.u.int64;
+      config->prefetch_count.value = (uint16_t)prefetch_count.u.int64;
     }
   }
 
@@ -452,14 +457,23 @@ void app_config_cleanup(app_config_t *config) {
   return ok;
 }
 
+[[nodiscard]] app_config_status_t
+app_load_toml_config(rabbitmq_console_config_t *config,
+                     const rabbitmq_console_cli_overrides_t *overrides) {
+  return app_load_toml_config_impl(config, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_LOAD_ERROR;
+}
+
 /* Store borrowed argv views without transferring their ownership. */
-[[nodiscard]] bool app_parse_cli(int argc, char *argv[],
-                                 app_cli_overrides_t *overrides) {
+[[nodiscard]] static bool
+app_parse_cli_impl(int argc, char *argv[],
+                   rabbitmq_console_cli_overrides_t *overrides) {
   if (overrides == nullptr) {
     return false;
   }
 
-  *overrides = (app_cli_overrides_t){
+  *overrides = (rabbitmq_console_cli_overrides_t){
       .config_path = APP_DEFAULT_CONFIG_PATH,
   };
 
@@ -584,10 +598,18 @@ void app_config_cleanup(app_config_t *config) {
   return true;
 }
 
+[[nodiscard]] app_config_status_t
+app_parse_cli(int argc, char *argv[],
+              rabbitmq_console_cli_overrides_t *overrides) {
+  return app_parse_cli_impl(argc, argv, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_INVALID_ARGUMENT;
+}
+
 /* Commit validated CLI values as the final configuration layer. */
-[[nodiscard]] bool
-app_apply_cli_overrides(app_config_t *config,
-                        const app_cli_overrides_t *overrides) {
+[[nodiscard]] static bool app_apply_cli_overrides_impl(
+    rabbitmq_console_config_t *config,
+    const rabbitmq_console_cli_overrides_t *overrides) {
   if (config == nullptr || overrides == nullptr) {
     return false;
   }
@@ -633,7 +655,7 @@ app_apply_cli_overrides(app_config_t *config,
 
   if (overrides->rabbitmq_port_text != nullptr &&
       !app_parse_uint16(overrides->rabbitmq_port_text, false,
-                        &config->rabbitmq_port)) {
+                        &config->rabbitmq_port.value)) {
     ulog_error("Invalid --rabbitmq-port value '%s' (expected 1..65535)\n",
                overrides->rabbitmq_port_text);
     return false;
@@ -641,7 +663,7 @@ app_apply_cli_overrides(app_config_t *config,
 
   if (overrides->read_timeout_seconds_text != nullptr &&
       !app_parse_uint32(overrides->read_timeout_seconds_text, 1,
-                        (uint32_t)INT_MAX, &config->read_timeout_seconds)) {
+                        (uint32_t)INT_MAX, &config->read_timeout.value)) {
     ulog_error("Invalid --read-timeout-seconds value '%s' (expected 1..%d)\n",
                overrides->read_timeout_seconds_text, INT_MAX);
     return false;
@@ -655,7 +677,7 @@ app_apply_cli_overrides(app_config_t *config,
                  overrides->prefetch_count_text);
       return false;
     }
-    config->prefetch_count = parsed_prefetch;
+    config->prefetch_count.value = parsed_prefetch;
   }
 
   if (overrides->rabbitmq_queue_durable_set) {
@@ -667,4 +689,12 @@ app_apply_cli_overrides(app_config_t *config,
   }
 
   return true;
+}
+
+[[nodiscard]] app_config_status_t
+app_apply_cli_overrides(rabbitmq_console_config_t *config,
+                        const rabbitmq_console_cli_overrides_t *overrides) {
+  return app_apply_cli_overrides_impl(config, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_INVALID_VALUE;
 }

@@ -147,33 +147,38 @@ void app_print_usage(const char *program_name) {
   return true;
 }
 
-void app_config_set_defaults(app_config *config) {
+void app_config_set_defaults(monitor_config_t *config) {
   config->host = APP_DEFAULT_HOST;
-  config->port = APP_DEFAULT_PORT;
+  config->port = (app_port_t){.value = APP_DEFAULT_PORT};
   config->path = APP_DEFAULT_PATH;
   config->request = APP_DEFAULT_REQUEST;
   config->log_level = APP_DEFAULT_LOG_LEVEL;
   config->log_color = APP_DEFAULT_LOG_COLOR;
   config->secure = true;
   config->redis_host = APP_DEFAULT_REDIS_HOST;
-  config->redis_port = APP_DEFAULT_REDIS_PORT;
+  config->redis_port = (app_port_t){.value = APP_DEFAULT_REDIS_PORT};
   config->redis_monitored_set_key = APP_DEFAULT_REDIS_MONITORED_SET_KEY;
   config->rabbitmq_host = APP_DEFAULT_RABBITMQ_HOST;
-  config->rabbitmq_port = APP_DEFAULT_RABBITMQ_PORT;
+  config->rabbitmq_port = (app_port_t){.value = APP_DEFAULT_RABBITMQ_PORT};
   config->rabbitmq_username = APP_DEFAULT_RABBITMQ_USERNAME;
   config->rabbitmq_password = APP_DEFAULT_RABBITMQ_PASSWORD;
   config->rabbitmq_vhost = APP_DEFAULT_RABBITMQ_VHOST;
   config->rabbitmq_queue = APP_DEFAULT_RABBITMQ_QUEUE;
   config->rabbitmq_queue_durable = true;
-  config->rabbitmq_channel = APP_DEFAULT_RABBITMQ_CHANNEL;
-  config->rabbitmq_heartbeat_seconds = APP_DEFAULT_RABBITMQ_HEARTBEAT_SECONDS;
+  config->rabbitmq_channel =
+      (app_rabbitmq_channel_t){.value = APP_DEFAULT_RABBITMQ_CHANNEL};
+  config->rabbitmq_heartbeat =
+      (app_seconds_t){.value = APP_DEFAULT_RABBITMQ_HEARTBEAT_SECONDS};
   config->rabbitmq_enabled = true;
-  config->read_timeout_seconds = APP_DEFAULT_READ_TIMEOUT_SECONDS;
-  config->write_timeout_seconds = APP_DEFAULT_WRITE_TIMEOUT_SECONDS;
+  config->read_timeout =
+      (app_seconds_t){.value = APP_DEFAULT_READ_TIMEOUT_SECONDS};
+  config->write_timeout =
+      (app_seconds_t){.value = APP_DEFAULT_WRITE_TIMEOUT_SECONDS};
   config->reconnect_enabled = true;
-  config->reconnect_initial_backoff_ms =
-      APP_DEFAULT_RECONNECT_INITIAL_BACKOFF_MS;
-  config->reconnect_max_backoff_ms = APP_DEFAULT_RECONNECT_MAX_BACKOFF_MS;
+  config->reconnect_initial_backoff =
+      (app_milliseconds_t){.value = APP_DEFAULT_RECONNECT_INITIAL_BACKOFF_MS};
+  config->reconnect_max_backoff =
+      (app_milliseconds_t){.value = APP_DEFAULT_RECONNECT_MAX_BACKOFF_MS};
 }
 
 [[nodiscard]] static bool app_parse_log_level(const char *value,
@@ -263,7 +268,7 @@ static void app_clear_and_free_secret(char **secret) {
   *secret = nullptr;
 }
 
-void app_config_cleanup(app_config *config) {
+void app_config_cleanup(monitor_config_t *config) {
   free(config->host_owned);
   free(config->path_owned);
   free(config->request_owned);
@@ -348,8 +353,9 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
 
 /* Load the optional TOML layer over defaults; no CLI values are applied here.
  */
-[[nodiscard]] bool app_load_toml_config(app_config *config,
-                                        const app_cli_overrides *overrides) {
+[[nodiscard]] static bool
+app_load_toml_config_impl(monitor_config_t *config,
+                          const monitor_cli_overrides_t *overrides) {
   FILE *fp = fopen(overrides->config_path, "rb");
   if (fp == nullptr) {
     if (!overrides->config_path_set && errno == ENOENT) {
@@ -411,7 +417,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
           "Config key 'connection.port' must be an integer in range 1..65535");
       ok = false;
     } else {
-      config->port = (uint16_t)port.u.int64;
+      config->port.value = (uint16_t)port.u.int64;
     }
   }
 
@@ -425,12 +431,12 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
     }
   }
 
-  ok = ok && app_apply_toml_uint32(
-                 parsed.toptab, "connection.read_timeout_seconds", 1,
-                 (uint32_t)INT_MAX, &config->read_timeout_seconds);
+  ok = ok &&
+       app_apply_toml_uint32(parsed.toptab, "connection.read_timeout_seconds",
+                             1, (uint32_t)INT_MAX, &config->read_timeout.value);
   ok = ok && app_apply_toml_uint32(
                  parsed.toptab, "connection.write_timeout_seconds", 1,
-                 (uint32_t)INT_MAX, &config->write_timeout_seconds);
+                 (uint32_t)INT_MAX, &config->write_timeout.value);
 
   toml_datum_t reconnect_enabled = toml_seek(parsed.toptab, "retry.enabled");
   if (ok && reconnect_enabled.type != TOML_UNKNOWN) {
@@ -443,12 +449,12 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   }
   ok = ok && app_apply_toml_uint32(parsed.toptab, "retry.initial_backoff_ms", 1,
                                    (uint32_t)INT_MAX,
-                                   &config->reconnect_initial_backoff_ms);
+                                   &config->reconnect_initial_backoff.value);
   ok = ok && app_apply_toml_uint32(parsed.toptab, "retry.max_backoff_ms", 1,
                                    (uint32_t)INT_MAX,
-                                   &config->reconnect_max_backoff_ms);
-  if (ok &&
-      config->reconnect_initial_backoff_ms > config->reconnect_max_backoff_ms) {
+                                   &config->reconnect_max_backoff.value);
+  if (ok && config->reconnect_initial_backoff.value >
+                config->reconnect_max_backoff.value) {
     ulog_error("Config key 'retry.max_backoff_ms' must be greater than or "
                "equal to retry.initial_backoff_ms");
     ok = false;
@@ -485,7 +491,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
           "Config key 'redis.port' must be an integer in range 1..65535");
       ok = false;
     } else {
-      config->redis_port = (uint16_t)redis_port.u.int64;
+      config->redis_port.value = (uint16_t)redis_port.u.int64;
     }
   }
 
@@ -497,7 +503,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
           "Config key 'rabbitmq.port' must be an integer in range 1..65535");
       ok = false;
     } else {
-      config->rabbitmq_port = (uint16_t)rabbitmq_port.u.int64;
+      config->rabbitmq_port.value = (uint16_t)rabbitmq_port.u.int64;
     }
   }
 
@@ -530,7 +536,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
           "Config key 'rabbitmq.channel' must be an integer in range 1..65535");
       ok = false;
     } else {
-      config->rabbitmq_channel = (uint16_t)rabbitmq_channel.u.int64;
+      config->rabbitmq_channel.value = (uint16_t)rabbitmq_channel.u.int64;
     }
   }
 
@@ -544,7 +550,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
                  "in range 1..65535");
       ok = false;
     } else {
-      config->rabbitmq_heartbeat_seconds =
+      config->rabbitmq_heartbeat.value =
           (uint16_t)rabbitmq_heartbeat_seconds.u.int64;
     }
   }
@@ -553,10 +559,18 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   return ok;
 }
 
+[[nodiscard]] app_config_status_t
+app_load_toml_config(monitor_config_t *config,
+                     const monitor_cli_overrides_t *overrides) {
+  return app_load_toml_config_impl(config, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_LOAD_ERROR;
+}
+
 /* Parse argv into borrowed views so validation and mutation stay separate. */
-[[nodiscard]] bool app_parse_cli(int argc, char *argv[],
-                                 app_cli_overrides *overrides) {
-  *overrides = (app_cli_overrides){0};
+[[nodiscard]] static bool
+app_parse_cli_impl(int argc, char *argv[], monitor_cli_overrides_t *overrides) {
+  *overrides = (monitor_cli_overrides_t){0};
   overrides->config_path = APP_DEFAULT_CONFIG_PATH;
 
   static const struct parg_option long_options[] = {
@@ -701,9 +715,17 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   return true;
 }
 
+[[nodiscard]] app_config_status_t
+app_parse_cli(int argc, char *argv[], monitor_cli_overrides_t *overrides) {
+  return app_parse_cli_impl(argc, argv, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_INVALID_ARGUMENT;
+}
+
 /* Apply the highest-precedence configuration layer after full validation. */
-[[nodiscard]] bool app_apply_cli_overrides(app_config *config,
-                                           const app_cli_overrides *overrides) {
+[[nodiscard]] static bool
+app_apply_cli_overrides_impl(monitor_config_t *config,
+                             const monitor_cli_overrides_t *overrides) {
   if (overrides->host != nullptr &&
       !app_replace_string(&config->host, &config->host_owned,
                           overrides->host)) {
@@ -786,7 +808,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
                  overrides->port_text);
       return false;
     }
-    config->port = port;
+    config->port.value = port;
   }
 
   if (overrides->secure_set) {
@@ -800,7 +822,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
                  overrides->redis_port_text);
       return false;
     }
-    config->redis_port = redis_port;
+    config->redis_port.value = redis_port;
   }
 
   if (overrides->rabbitmq_port_text != nullptr) {
@@ -811,7 +833,7 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
           overrides->rabbitmq_port_text);
       return false;
     }
-    config->rabbitmq_port = rabbitmq_port;
+    config->rabbitmq_port.value = rabbitmq_port;
   }
 
   if (overrides->rabbitmq_queue_durable_set) {
@@ -819,4 +841,12 @@ app_apply_toml_uint32(toml_datum_t root, const char *key, uint32_t min_value,
   }
 
   return true;
+}
+
+[[nodiscard]] app_config_status_t
+app_apply_cli_overrides(monitor_config_t *config,
+                        const monitor_cli_overrides_t *overrides) {
+  return app_apply_cli_overrides_impl(config, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_INVALID_VALUE;
 }

@@ -34,14 +34,14 @@ int main(int argc, char *argv[]) {
 
   /* Configuration owns any strings copied from TOML or command-line input. */
   int exit_code = EXIT_FAILURE;
-  app_config config = {0};
-  app_cli_overrides overrides = {0};
+  monitor_config_t config = {0};
+  monitor_cli_overrides_t overrides = {0};
 
   if (!app_apply_log_style_defaults()) {
     goto cleanup;
   }
 
-  if (!app_parse_cli(argc, argv, &overrides)) {
+  if (app_parse_cli(argc, argv, &overrides) != APP_CONFIG_STATUS_OK) {
     app_print_usage(argv[0]);
     goto cleanup;
   }
@@ -52,14 +52,14 @@ int main(int argc, char *argv[]) {
   }
 
   app_config_set_defaults(&config);
-  if (!app_load_toml_config(&config, &overrides) ||
-      !app_apply_cli_overrides(&config, &overrides) ||
+  if (app_load_toml_config(&config, &overrides) != APP_CONFIG_STATUS_OK ||
+      app_apply_cli_overrides(&config, &overrides) != APP_CONFIG_STATUS_OK ||
       !app_apply_log_color(config.log_color) ||
       !app_apply_log_level(config.log_level)) {
     goto cleanup;
   }
 
-  if (app_runtime_run(&config)) {
+  if (app_runtime_run(&config) == MONITOR_RUNTIME_STATUS_OK) {
     exit_code = EXIT_SUCCESS;
   }
 

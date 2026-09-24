@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
   }
 
   rpc_control_cli_overrides_t overrides = {0};
-  if (!rpc_control_parse_cli(argc, argv, &overrides)) {
+  if (rpc_control_parse_cli(argc, argv, &overrides) != APP_CONFIG_STATUS_OK) {
     rpc_control_print_usage(argv[0]);
     return EXIT_FAILURE;
   }
@@ -46,8 +46,10 @@ int main(int argc, char **argv) {
   rpc_control_config_t config = {0};
   rpc_control_config_set_defaults(&config);
 
-  bool config_ok = rpc_control_load_toml_config(&config, &overrides);
-  config_ok = config_ok && rpc_control_apply_cli_overrides(&config, &overrides);
+  bool config_ok =
+      rpc_control_load_toml_config(&config, &overrides) == APP_CONFIG_STATUS_OK;
+  config_ok = config_ok && rpc_control_apply_cli_overrides(
+                               &config, &overrides) == APP_CONFIG_STATUS_OK;
   if (!config_ok) {
     rpc_control_config_cleanup(&config);
     return EXIT_FAILURE;
@@ -68,14 +70,13 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  if (!rpc_control_connect_redis(&config)) {
+  if (rpc_control_connect_redis(&config) != RPC_CONTROL_STATUS_OK) {
     rpc_control_config_cleanup(&config);
     return EXIT_FAILURE;
   }
 
-  ulog_info("Starting RPC control server on %s:%" PRId32 " (backlog=%" PRId32
-            ")",
-            config.host, config.port, config.backlog);
+  ulog_info("Starting RPC control server on %s:%u (backlog=%" PRId32 ")",
+            config.host, (unsigned)config.port.value, config.backlog.value);
   ulog_info("RPC control authentication enabled (token required via 'auth' "
             "method)");
 
@@ -97,7 +98,8 @@ int main(int argc, char **argv) {
     (void)uv_signal_start(&sigterm_handle, rpc_control_on_signal, SIGTERM);
   }
 
-  start_jsonrpc_server(config.host, config.port, config.backlog, callbacks);
+  start_jsonrpc_server(config.host, (int32_t)config.port.value,
+                       config.backlog.value, callbacks);
   rpc_control_disconnect_redis();
   rpc_control_config_cleanup(&config);
 

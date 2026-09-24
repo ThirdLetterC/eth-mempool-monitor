@@ -9,7 +9,16 @@
 #include "jsonrpc/jsonrpc.h"
 #include "rpc_control/config_internal.h"
 
-[[nodiscard]] bool
+#include <stdint.h>
+
+typedef enum rpc_control_status : uint8_t {
+  RPC_CONTROL_STATUS_OK = 0,
+  RPC_CONTROL_STATUS_INVALID_CONFIG,
+  RPC_CONTROL_STATUS_ALLOCATION_FAILED,
+  RPC_CONTROL_STATUS_REDIS_ERROR,
+} rpc_control_status_t;
+
+[[nodiscard]] rpc_control_status_t
 rpc_control_connect_redis(const rpc_control_config_t *config);
 void rpc_control_disconnect_redis();
 

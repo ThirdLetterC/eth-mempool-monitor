@@ -14,6 +14,15 @@
  */
 constexpr size_t WS_ERROR_MESSAGE_CAPACITY = 256;
 
+typedef enum ws_opcode : uint8_t {
+  WS_OPCODE_CONTINUATION = 0x0,
+  WS_OPCODE_TEXT = 0x1,
+  WS_OPCODE_BINARY = 0x2,
+  WS_OPCODE_CLOSE = 0x8,
+  WS_OPCODE_PING = 0x9,
+  WS_OPCODE_PONG = 0xA,
+} ws_opcode_t;
+
 struct ws_client {
   int socket_fd;
   bool connected;
@@ -34,12 +43,15 @@ void ws_transport_set_read_error(ws_client_t *client, const char *context,
 /* Transport helpers borrow buffers and never retain caller-owned pointers. */
 [[nodiscard]] ssize_t ws_transport_receive(int fd, SSL *ssl, bool use_tls,
                                            uint8_t *buffer, size_t length);
-[[nodiscard]] bool ws_transport_read_exact(ws_client_t *client, uint8_t *buffer,
-                                           size_t length, const char *context);
-[[nodiscard]] bool ws_transport_send_all(int fd, SSL *ssl, bool use_tls,
-                                         const uint8_t *buffer, size_t length);
-[[nodiscard]] bool ws_transport_discard(ws_client_t *client, uint64_t length,
-                                        const char *context);
+[[nodiscard]] ws_status_t ws_transport_read_exact(ws_client_t *client,
+                                                  uint8_t *buffer,
+                                                  size_t length,
+                                                  const char *context);
+[[nodiscard]] ws_status_t ws_transport_send_all(int fd, SSL *ssl, bool use_tls,
+                                                const uint8_t *buffer,
+                                                size_t length);
+[[nodiscard]] ws_status_t
+ws_transport_discard(ws_client_t *client, uint64_t length, const char *context);
 [[nodiscard]] bool ws_random_bytes(uint8_t *buffer, size_t length);
 [[nodiscard]] bool ws_transport_connect_tcp(const char *host, uint16_t port,
                                             uint32_t read_timeout_seconds,
@@ -49,14 +61,14 @@ void ws_transport_set_read_error(ws_client_t *client, const char *context,
 [[nodiscard]] bool ws_transport_connect_tls(const char *host, int socket_fd,
                                             SSL_CTX *ctx, SSL **out_ssl);
 
-[[nodiscard]] bool ws_handshake_connect(ws_client_t *client, const char *host,
-                                        uint16_t port, const char *path,
-                                        bool use_tls);
+[[nodiscard]] ws_status_t ws_handshake_connect(ws_client_t *client,
+                                               const ws_endpoint_t *endpoint);
 
-[[nodiscard]] bool ws_frame_send(ws_client_t *client, uint8_t opcode,
-                                 const uint8_t *payload, size_t payload_length);
-[[nodiscard]] bool ws_frame_receive(ws_client_t *client,
-                                    uint8_t expected_opcode,
-                                    const char *expected_name, uint8_t *buffer,
-                                    size_t capacity, size_t *out_length,
-                                    bool add_nul_terminator);
+[[nodiscard]] ws_status_t ws_frame_send(ws_client_t *client, ws_opcode_t opcode,
+                                        const uint8_t *payload,
+                                        size_t payload_length);
+[[nodiscard]] ws_status_t ws_frame_receive(ws_client_t *client,
+                                           ws_opcode_t expected_opcode,
+                                           uint8_t *buffer, size_t capacity,
+                                           size_t *out_length,
+                                           bool add_nul_terminator);

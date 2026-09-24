@@ -9,7 +9,7 @@
 #include <strings.h>
 #include <uv.h>
 
-#include "hiredis/hiredis.h"
+#include "app/hiredis_compat.h"
 #include "jsonrpc/jsonrpc.h"
 #include "rpc_control/config_internal.h"
 #include "rpc_control/service_internal.h"
@@ -163,27 +163,33 @@ static void rpc_control_forget_connection_auth(jsonrpc_conn_t *conn) {
 }
 
 /* Establish the sole Redis context retained by the service runtime. */
-[[nodiscard]] bool
+[[nodiscard]] rpc_control_status_t
 rpc_control_connect_redis(const rpc_control_config_t *config) {
+  if (config == nullptr || config->auth_token == nullptr ||
+      config->redis_host == nullptr || config->redis_port.value == 0 ||
+      config->redis_set_key == nullptr) {
+    return RPC_CONTROL_STATUS_INVALID_CONFIG;
+  }
   g_runtime.auth_token = config->auth_token;
-  g_runtime.redis = redisConnect(config->redis_host, (int)config->redis_port);
+  g_runtime.redis =
+      redisConnect(config->redis_host, (int)config->redis_port.value);
   if (g_runtime.redis == nullptr) {
     ulog_error("Failed to allocate Redis context\n");
-    return false;
+    return RPC_CONTROL_STATUS_ALLOCATION_FAILED;
   }
 
   if (g_runtime.redis->err != 0) {
     ulog_error("Failed to connect to Redis at %s:%u: %s\n", config->redis_host,
-               config->redis_port, g_runtime.redis->errstr);
+               (unsigned)config->redis_port.value, g_runtime.redis->errstr);
     redisFree(g_runtime.redis);
     g_runtime.redis = nullptr;
-    return false;
+    return RPC_CONTROL_STATUS_REDIS_ERROR;
   }
 
   g_runtime.redis_set_key = config->redis_set_key;
   ulog_info("Connected to Redis at %s:%u (set=%s)", config->redis_host,
-            config->redis_port, g_runtime.redis_set_key);
-  return true;
+            (unsigned)config->redis_port.value, g_runtime.redis_set_key);
+  return RPC_CONTROL_STATUS_OK;
 }
 
 void rpc_control_disconnect_redis() {

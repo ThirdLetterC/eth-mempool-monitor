@@ -15,18 +15,24 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
  * are masked into a bounded stack buffer to avoid per-frame allocation.
  */
 
-[[nodiscard]] bool ws_frame_send(ws_client_t *client, uint8_t opcode,
-                                 const uint8_t *payload,
-                                 size_t payload_length) {
+[[nodiscard]] ws_status_t ws_frame_send(ws_client_t *client, ws_opcode_t opcode,
+                                        const uint8_t *payload,
+                                        size_t payload_length) {
   if (client == nullptr || !client->connected) {
-    return false;
+    return WS_STATUS_INVALID_STATE;
+  }
+  if ((payload == nullptr && payload_length != 0) ||
+      (opcode != WS_OPCODE_CONTINUATION && opcode != WS_OPCODE_TEXT &&
+       opcode != WS_OPCODE_BINARY && opcode != WS_OPCODE_CLOSE &&
+       opcode != WS_OPCODE_PING && opcode != WS_OPCODE_PONG)) {
+    return WS_STATUS_INVALID_ARGUMENT;
   }
   ulog_trace("[ws-client] send frame opcode=0x%X payload=%zu", (unsigned)opcode,
              payload_length);
 
   if (payload_length > (size_t)INT64_MAX) {
     ws_set_error(client, "Frame payload is too large");
-    return false;
+    return WS_STATUS_INVALID_ARGUMENT;
   }
 
   uint8_t send_buffer[WS_FRAME_SEND_BUFFER_CAPACITY] = {0};
@@ -51,7 +57,7 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
   uint8_t mask[4] = {0};
   if (!ws_random_bytes(mask, sizeof(mask))) {
     ws_set_error(client, "Failed to generate websocket mask");
-    return false;
+    return WS_STATUS_TRANSPORT_ERROR;
   }
 
   memcpy(send_buffer + offset, mask, sizeof(mask));
@@ -64,29 +70,40 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
     size_t chunk_length = remaining < available ? remaining : available;
 
     for (size_t i = 0; i < chunk_length; ++i) {
-      auto source = payload != nullptr ? payload[payload_offset + i] : 0U;
-      send_buffer[offset + i] = source ^ mask[(payload_offset + i) % 4];
+      uint8_t source =
+          payload != nullptr ? payload[payload_offset + i] : (uint8_t)0;
+      send_buffer[offset + i] =
+          (uint8_t)(source ^ mask[(payload_offset + i) % 4]);
     }
 
-    if (!ws_transport_send_all(client->socket_fd, client->ssl, client->use_tls,
-                               send_buffer, offset + chunk_length)) {
+    auto send_status =
+        ws_transport_send_all(client->socket_fd, client->ssl, client->use_tls,
+                              send_buffer, offset + chunk_length);
+    if (send_status != WS_STATUS_OK) {
       ws_set_error(client, "Failed to send frame: %s", strerror(errno));
-      return false;
+      return send_status;
     }
 
     payload_offset += chunk_length;
     if (payload_offset == payload_length) {
-      return true;
+      return WS_STATUS_OK;
     }
     offset = 0;
   }
 }
 
-[[nodiscard]] bool ws_frame_receive(ws_client_t *client,
-                                    uint8_t expected_opcode,
-                                    const char *expected_name, uint8_t *buffer,
-                                    size_t capacity, size_t *out_length,
-                                    bool add_nul_terminator) {
+[[nodiscard]] ws_status_t ws_frame_receive(ws_client_t *client,
+                                           ws_opcode_t expected_opcode,
+                                           uint8_t *buffer, size_t capacity,
+                                           size_t *out_length,
+                                           bool add_nul_terminator) {
+  if (client == nullptr || buffer == nullptr || capacity == 0 ||
+      (expected_opcode != WS_OPCODE_TEXT &&
+       expected_opcode != WS_OPCODE_BINARY)) {
+    return WS_STATUS_INVALID_ARGUMENT;
+  }
+  const char *expected_name =
+      expected_opcode == WS_OPCODE_TEXT ? "text" : "binary";
   ulog_trace("[ws-client] receive %s frame(s) capacity=%zu", expected_name,
              capacity);
   size_t total_length = 0;
@@ -95,28 +112,31 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
 
   while (true) {
     uint8_t header[2] = {0};
-    if (!ws_transport_read_exact(client, header, sizeof(header),
-                                 "Reading websocket frame header")) {
-      return false;
+    auto read_status = ws_transport_read_exact(
+        client, header, sizeof(header), "Reading websocket frame header");
+    if (read_status != WS_STATUS_OK) {
+      return read_status;
     }
 
     auto fin = (header[0] & 0x80U) != 0;
-    auto opcode = header[0] & 0x0FU;
+    auto opcode = (ws_opcode_t)(header[0] & 0x0FU);
     auto masked = (header[1] & 0x80U) != 0;
 
     uint64_t payload_length = header[1] & 0x7FU;
     if (payload_length == 126U) {
       uint8_t extended[2] = {0};
-      if (!ws_transport_read_exact(client, extended, sizeof(extended),
-                                   "Reading websocket frame length")) {
-        return false;
+      read_status = ws_transport_read_exact(client, extended, sizeof(extended),
+                                            "Reading websocket frame length");
+      if (read_status != WS_STATUS_OK) {
+        return read_status;
       }
       payload_length = ((uint64_t)extended[0] << 8U) | (uint64_t)extended[1];
     } else if (payload_length == 127U) {
       uint8_t extended[8] = {0};
-      if (!ws_transport_read_exact(client, extended, sizeof(extended),
-                                   "Reading websocket frame length")) {
-        return false;
+      read_status = ws_transport_read_exact(client, extended, sizeof(extended),
+                                            "Reading websocket frame length");
+      if (read_status != WS_STATUS_OK) {
+        return read_status;
       }
       payload_length = 0;
       for (size_t i = 0; i < 8; ++i) {
@@ -130,34 +150,36 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
 
     uint8_t mask[4] = {0};
     if (masked) {
-      if (!ws_transport_read_exact(client, mask, sizeof(mask),
-                                   "Reading websocket frame mask")) {
-        return false;
+      read_status = ws_transport_read_exact(client, mask, sizeof(mask),
+                                            "Reading websocket frame mask");
+      if (read_status != WS_STATUS_OK) {
+        return read_status;
       }
     }
 
-    if (opcode == 0x8U) {
+    if (opcode == WS_OPCODE_CLOSE) {
       (void)ws_transport_discard(client, payload_length,
                                  "Discarding close frame payload");
       ws_client_close(client);
       ws_set_error(client, "Connection closed by server");
-      return false;
+      return WS_STATUS_PEER_CLOSED;
     }
 
-    if (opcode == 0x9U) {
+    if (opcode == WS_OPCODE_PING) {
       if (!fin) {
         ws_set_error(client, "Ping frames must not be fragmented");
-        return false;
+        return WS_STATUS_PROTOCOL_ERROR;
       }
       if (payload_length > 125U) {
         ws_set_error(client, "Invalid ping frame length");
-        return false;
+        return WS_STATUS_PROTOCOL_ERROR;
       }
 
       uint8_t ping_payload[125] = {0};
-      if (!ws_transport_read_exact(client, ping_payload, (size_t)payload_length,
-                                   "Reading ping payload")) {
-        return false;
+      read_status = ws_transport_read_exact(
+          client, ping_payload, (size_t)payload_length, "Reading ping payload");
+      if (read_status != WS_STATUS_OK) {
+        return read_status;
       }
 
       if (masked) {
@@ -166,35 +188,38 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
         }
       }
 
-      if (!ws_frame_send(client, 0xAU, ping_payload, (size_t)payload_length)) {
-        return false;
+      auto pong_status = ws_frame_send(client, WS_OPCODE_PONG, ping_payload,
+                                       (size_t)payload_length);
+      if (pong_status != WS_STATUS_OK) {
+        return pong_status;
       }
       ulog_trace("[ws-client] ping handled, pong sent payload=%llu",
                  (unsigned long long)payload_length);
       continue;
     }
 
-    if (opcode == 0xAU) {
+    if (opcode == WS_OPCODE_PONG) {
       if (!fin) {
         ws_set_error(client, "Pong frames must not be fragmented");
-        return false;
+        return WS_STATUS_PROTOCOL_ERROR;
       }
-      if (!ws_transport_discard(client, payload_length,
-                                "Discarding pong payload")) {
-        return false;
+      auto discard_status = ws_transport_discard(client, payload_length,
+                                                 "Discarding pong payload");
+      if (discard_status != WS_STATUS_OK) {
+        return discard_status;
       }
       continue;
     }
 
     bool is_start = opcode == expected_opcode;
-    bool is_continuation = opcode == 0x0U;
+    bool is_continuation = opcode == WS_OPCODE_CONTINUATION;
     if (!is_start && !is_continuation) {
       (void)ws_transport_discard(client, payload_length,
                                  "Discarding unexpected frame payload");
       ws_set_error(client,
                    "Unexpected websocket opcode 0x%X while waiting for %s data",
                    (unsigned)opcode, expected_name);
-      return false;
+      return WS_STATUS_PROTOCOL_ERROR;
     }
 
     if (is_start) {
@@ -205,7 +230,7 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
         ws_set_error(
             client, "Received new %s frame before fragmented message completed",
             expected_name);
-        return false;
+        return WS_STATUS_PROTOCOL_ERROR;
       }
       receiving_fragments = true;
     } else if (!receiving_fragments) {
@@ -213,7 +238,7 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
           client, payload_length,
           "Discarding unexpected continuation frame payload");
       ws_set_error(client, "Unexpected continuation frame");
-      return false;
+      return WS_STATUS_PROTOCOL_ERROR;
     }
 
     auto terminator_size = add_nul_terminator ? (size_t)1 : (size_t)0;
@@ -224,12 +249,13 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
       (void)ws_transport_discard(client, payload_length,
                                  "Discarding oversized frame payload");
       ws_set_error(client, "Frame too large for this platform");
-      return false;
+      return WS_STATUS_PROTOCOL_ERROR;
     }
     if (required > capacity || discarding_oversized_message) {
-      if (!ws_transport_discard(client, payload_length,
-                                "Discarding oversized frame payload")) {
-        return false;
+      auto discard_status = ws_transport_discard(
+          client, payload_length, "Discarding oversized frame payload");
+      if (discard_status != WS_STATUS_OK) {
+        return discard_status;
       }
 
       total_length += (size_t)payload_length;
@@ -240,13 +266,14 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
 
       ws_set_error(client, "Receive buffer is too small (%zu bytes required)",
                    total_length + terminator_size);
-      return false;
+      return WS_STATUS_BUFFER_TOO_SMALL;
     }
 
-    if (!ws_transport_read_exact(client, buffer + total_length,
-                                 (size_t)payload_length,
-                                 "Reading websocket frame payload")) {
-      return false;
+    read_status = ws_transport_read_exact(client, buffer + total_length,
+                                          (size_t)payload_length,
+                                          "Reading websocket frame payload");
+    if (read_status != WS_STATUS_OK) {
+      return read_status;
     }
 
     if (masked) {
@@ -270,6 +297,6 @@ constexpr size_t WS_FRAME_SEND_BUFFER_CAPACITY = 4 * 1'024;
     }
     ulog_trace("[ws-client] receive complete type=%s bytes=%zu", expected_name,
                total_length);
-    return true;
+    return WS_STATUS_OK;
   }
 }

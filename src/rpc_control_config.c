@@ -148,13 +148,14 @@ void rpc_control_config_set_defaults(rpc_control_config_t *config) {
   }
 
   config->host = RPC_CONTROL_DEFAULT_HOST;
-  config->port = RPC_CONTROL_DEFAULT_PORT;
-  config->backlog = RPC_CONTROL_DEFAULT_BACKLOG;
+  config->port = (app_port_t){.value = RPC_CONTROL_DEFAULT_PORT};
+  config->backlog =
+      (app_socket_backlog_t){.value = RPC_CONTROL_DEFAULT_BACKLOG};
   config->auth_token = RPC_CONTROL_DEFAULT_AUTH_TOKEN;
   config->log_level = RPC_CONTROL_DEFAULT_LOG_LEVEL;
   config->log_color = RPC_CONTROL_DEFAULT_LOG_COLOR;
   config->redis_host = RPC_CONTROL_DEFAULT_REDIS_HOST;
-  config->redis_port = RPC_CONTROL_DEFAULT_REDIS_PORT;
+  config->redis_port = (app_port_t){.value = RPC_CONTROL_DEFAULT_REDIS_PORT};
   config->redis_set_key = RPC_CONTROL_DEFAULT_REDIS_SET_KEY;
 }
 
@@ -187,16 +188,6 @@ static bool rpc_control_parse_u16(const char *text, uint16_t *out_value) {
   }
 
   *out_value = (uint16_t)parsed;
-  return true;
-}
-
-static bool rpc_control_parse_i32_port(const char *text, int32_t *out_port) {
-  uint16_t parsed = 0;
-  if (!rpc_control_parse_u16(text, &parsed)) {
-    return false;
-  }
-
-  *out_port = (int32_t)parsed;
   return true;
 }
 
@@ -325,9 +316,9 @@ static bool rpc_control_parse_i32_positive(const char *text,
 }
 
 /* Load TOML values over defaults while retaining ownership in config. */
-[[nodiscard]] bool
-rpc_control_load_toml_config(rpc_control_config_t *config,
-                             const rpc_control_cli_overrides_t *overrides) {
+[[nodiscard]] static bool rpc_control_load_toml_config_impl(
+    rpc_control_config_t *config,
+    const rpc_control_cli_overrides_t *overrides) {
   FILE *fp = fopen(overrides->config_path, "rb");
   if (fp == nullptr) {
     if (!overrides->config_path_set && errno == ENOENT) {
@@ -370,7 +361,7 @@ rpc_control_load_toml_config(rpc_control_config_t *config,
                  "range 1..65535\n");
       ok = false;
     } else {
-      config->port = (int32_t)rpc_port.u.int64;
+      config->port.value = (uint16_t)rpc_port.u.int64;
     }
   }
 
@@ -383,7 +374,7 @@ rpc_control_load_toml_config(rpc_control_config_t *config,
                  INT32_MAX);
       ok = false;
     } else {
-      config->backlog = (int32_t)rpc_backlog.u.int64;
+      config->backlog.value = (int32_t)rpc_backlog.u.int64;
     }
   }
 
@@ -395,7 +386,7 @@ rpc_control_load_toml_config(rpc_control_config_t *config,
           "Config key 'redis.port' must be an integer in range 1..65535\n");
       ok = false;
     } else {
-      config->redis_port = (uint16_t)redis_port.u.int64;
+      config->redis_port.value = (uint16_t)redis_port.u.int64;
     }
   }
 
@@ -427,10 +418,18 @@ rpc_control_load_toml_config(rpc_control_config_t *config,
   return ok;
 }
 
+[[nodiscard]] app_config_status_t
+rpc_control_load_toml_config(rpc_control_config_t *config,
+                             const rpc_control_cli_overrides_t *overrides) {
+  return rpc_control_load_toml_config_impl(config, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_LOAD_ERROR;
+}
+
 /* Parse argv into borrowed views; this phase does not mutate config. */
-[[nodiscard]] bool
-rpc_control_parse_cli(int argc, char *argv[],
-                      rpc_control_cli_overrides_t *overrides) {
+[[nodiscard]] static bool
+rpc_control_parse_cli_impl(int argc, char *argv[],
+                           rpc_control_cli_overrides_t *overrides) {
   *overrides = (rpc_control_cli_overrides_t){
       .config_path = RPC_CONTROL_DEFAULT_CONFIG_PATH,
   };
@@ -522,10 +521,18 @@ rpc_control_parse_cli(int argc, char *argv[],
   return true;
 }
 
+[[nodiscard]] app_config_status_t
+rpc_control_parse_cli(int argc, char *argv[],
+                      rpc_control_cli_overrides_t *overrides) {
+  return rpc_control_parse_cli_impl(argc, argv, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_INVALID_ARGUMENT;
+}
+
 /* Validate and apply CLI values as the highest-precedence layer. */
-[[nodiscard]] bool
-rpc_control_apply_cli_overrides(rpc_control_config_t *config,
-                                const rpc_control_cli_overrides_t *overrides) {
+[[nodiscard]] static bool rpc_control_apply_cli_overrides_impl(
+    rpc_control_config_t *config,
+    const rpc_control_cli_overrides_t *overrides) {
   if (overrides->host != nullptr &&
       !rpc_control_replace_string(&config->host, &config->host_owned,
                                   overrides->host)) {
@@ -534,7 +541,7 @@ rpc_control_apply_cli_overrides(rpc_control_config_t *config,
   }
 
   if (overrides->port_text != nullptr) {
-    if (!rpc_control_parse_i32_port(overrides->port_text, &config->port)) {
+    if (!rpc_control_parse_u16(overrides->port_text, &config->port.value)) {
       ulog_error("Invalid value for --port: %s\n", overrides->port_text);
       return false;
     }
@@ -542,7 +549,7 @@ rpc_control_apply_cli_overrides(rpc_control_config_t *config,
 
   if (overrides->backlog_text != nullptr) {
     if (!rpc_control_parse_i32_positive(overrides->backlog_text,
-                                        &config->backlog)) {
+                                        &config->backlog.value)) {
       ulog_error("Invalid value for --backlog: %s\n", overrides->backlog_text);
       return false;
     }
@@ -566,7 +573,7 @@ rpc_control_apply_cli_overrides(rpc_control_config_t *config,
 
   if (overrides->redis_port_text != nullptr) {
     if (!rpc_control_parse_u16(overrides->redis_port_text,
-                               &config->redis_port)) {
+                               &config->redis_port.value)) {
       ulog_error("Invalid value for --redis-port: %s\n",
                  overrides->redis_port_text);
       return false;
@@ -582,6 +589,14 @@ rpc_control_apply_cli_overrides(rpc_control_config_t *config,
   }
 
   return true;
+}
+
+[[nodiscard]] app_config_status_t
+rpc_control_apply_cli_overrides(rpc_control_config_t *config,
+                                const rpc_control_cli_overrides_t *overrides) {
+  return rpc_control_apply_cli_overrides_impl(config, overrides)
+             ? APP_CONFIG_STATUS_OK
+             : APP_CONFIG_STATUS_INVALID_VALUE;
 }
 
 [[nodiscard]] bool

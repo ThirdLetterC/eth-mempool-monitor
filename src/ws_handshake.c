@@ -298,12 +298,20 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
   return ws_base64_encode(digest, sizeof(digest), output, output_capacity) != 0;
 }
 
-[[nodiscard]] bool ws_handshake_connect(ws_client_t *client, const char *host,
-                                        uint16_t port, const char *path,
-                                        bool use_tls) {
-  if (client == nullptr || host == nullptr || path == nullptr) {
-    return false;
+[[nodiscard]] ws_status_t ws_handshake_connect(ws_client_t *client,
+                                               const ws_endpoint_t *endpoint) {
+  if (client == nullptr || endpoint == nullptr ||
+      endpoint->server.host == nullptr || endpoint->server.port.value == 0 ||
+      endpoint->path == nullptr ||
+      (endpoint->transport != WS_TRANSPORT_PLAIN &&
+       endpoint->transport != WS_TRANSPORT_TLS)) {
+    return WS_STATUS_INVALID_ARGUMENT;
   }
+
+  const char *host = endpoint->server.host;
+  uint16_t port = endpoint->server.port.value;
+  const char *path = endpoint->path;
+  bool use_tls = endpoint->transport == WS_TRANSPORT_TLS;
 
   ulog_debug("[ws-client] connect start scheme=%s host=%s port=%u path=%s",
              use_tls ? "wss" : "ws", host, (unsigned)port, path);
@@ -316,7 +324,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
   if (!ws_transport_connect_tcp(host, port, client->read_timeout_seconds,
                                 client->write_timeout_seconds, &socket_fd)) {
     ws_set_error(client, "Failed to connect to %s:%u", host, (unsigned)port);
-    return false;
+    return WS_STATUS_TRANSPORT_ERROR;
   }
 
   SSL *ssl = nullptr;
@@ -326,7 +334,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       ws_set_error(client, "Failed to establish TLS with %s:%u", host,
                    (unsigned)port);
       (void)close(socket_fd);
-      return false;
+      return WS_STATUS_TLS_ERROR;
     }
   }
 
@@ -337,7 +345,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_TRANSPORT_ERROR;
   }
 
   char key_encoded[32] = {0};
@@ -348,7 +356,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   char request[1024] = {0};
@@ -369,17 +377,17 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
-  if (!ws_transport_send_all(socket_fd, ssl, use_tls, (const uint8_t *)request,
-                             (size_t)request_length)) {
+  if (ws_transport_send_all(socket_fd, ssl, use_tls, (const uint8_t *)request,
+                            (size_t)request_length) != WS_STATUS_OK) {
     ws_set_error(client, "Failed to send handshake: %s", strerror(errno));
     if (ssl != nullptr) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_TRANSPORT_ERROR;
   }
   ulog_trace("[ws-client] websocket handshake request sent bytes=%zu",
              (size_t)request_length);
@@ -396,7 +404,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
         SSL_free(ssl);
       }
       (void)close(socket_fd);
-      return false;
+      return bytes == 0 ? WS_STATUS_PEER_CLOSED : WS_STATUS_TRANSPORT_ERROR;
     }
 
     response[response_length++] = (char)byte;
@@ -414,7 +422,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   if (strncmp(response, "HTTP/1.1 101", 12) != 0 &&
@@ -424,7 +432,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   char upgrade_header[WS_MAX_HEADER_VALUE] = {0};
@@ -436,7 +444,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   char connection_header[WS_MAX_HEADER_VALUE] = {0};
@@ -448,7 +456,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   char accept_received[WS_MAX_HEADER_VALUE] = {0};
@@ -459,7 +467,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   char accept_expected[WS_MAX_HEADER_VALUE] = {0};
@@ -470,7 +478,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   if (strcmp(accept_received, accept_expected) != 0) {
@@ -479,7 +487,7 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
       SSL_free(ssl);
     }
     (void)close(socket_fd);
-    return false;
+    return WS_STATUS_PROTOCOL_ERROR;
   }
 
   client->socket_fd = socket_fd;
@@ -490,5 +498,5 @@ static void ws_sha1_final(sha1_ctx_t *ctx, uint8_t digest[20]) {
   ulog_debug("[ws-client] websocket connection established scheme=%s host=%s "
              "port=%u path=%s fd=%d",
              use_tls ? "wss" : "ws", host, (unsigned)port, path, socket_fd);
-  return true;
+  return WS_STATUS_OK;
 }
