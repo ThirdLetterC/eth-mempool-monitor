@@ -70,3 +70,4 @@ __pycache__/
 # Profiling and diagnostics
 massif.out*
 callgrind.out.*
+binance_sep26_addresses.toml
