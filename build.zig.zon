@@ -10,8 +10,8 @@
             .lazy = true,
         },
         .curl = .{
-            .url = "git+https://github.com/allyourcodebase/curl.git#c59c65cd767951abfe9ac0b1e075e64733953361",
-            .hash = "curl-8.18.0-mFDAWPf7AACO9V1eofR62eABcrB1QQtT1a-DN5XumC53",
+            .url = "git+https://github.com/curl/curl.git#01346829096c61b372692f6dc43ffa778c6caccd",
+            .hash = "N-V-__8AAArHFgHURV07GX_f3kHvbn04Fs7IdNY0FLgP76Ov",
         },
     },
     .paths = .{

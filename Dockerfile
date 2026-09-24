@@ -16,7 +16,6 @@ RUN apt-get update \
         gcc \
         libc6-dev \
         pkg-config \
-        libssl-dev \
         libwolfssl-dev \
         libuv1-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -55,19 +54,12 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libssl3 \
-        libwolfssl35 \
-        libuv1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/zig-out/bin/eth_mempool_monitor /usr/local/bin/eth_mempool_monitor
 COPY --from=builder /src/zig-out/bin/rpc_control /usr/local/bin/rpc_control
 COPY --from=builder /src/zig-out/bin/rabbitmq_tx_console /usr/local/bin/rabbitmq_tx_console
 COPY --from=builder /src/zig-out/bin/http_transmitter /usr/local/bin/http_transmitter
-COPY --from=builder /src/zig-out/lib/libcurl.so /usr/local/lib/libcurl.so
-
-ENV LD_LIBRARY_PATH=/usr/local/lib
-
 USER nobody:nogroup
 
 ENTRYPOINT ["/usr/local/bin/eth_mempool_monitor"]

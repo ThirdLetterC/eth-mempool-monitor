@@ -1,5 +1,4 @@
 const std = @import("std");
-const curl_package = @import("curl");
 
 const posix_feature_flag = "-D_POSIX_C_SOURCE=200809L";
 
@@ -64,6 +63,206 @@ const rabbitmq_files = [_][]const u8{
     "src/rabbitmq/amqp_url.c",
 };
 
+const curl_files = [_][]const u8{
+    "altsvc.c",
+    "amigaos.c",
+    "api.c",
+    "bufq.c",
+    "bufref.c",
+    "cf-h1-proxy.c",
+    "cf-h2-proxy.c",
+    "cf-haproxy.c",
+    "cf-https-connect.c",
+    "cf-ip-happy.c",
+    "cf-recvbuf.c",
+    "cf-setup.c",
+    "cf-socket.c",
+    "cfilters.c",
+    "conncache.c",
+    "connect.c",
+    "content_encoding.c",
+    "cookie.c",
+    "creds.c",
+    "cshutdn.c",
+    "curl_addrinfo.c",
+    "curl_ed25519.c",
+    "curl_endian.c",
+    "curl_fnmatch.c",
+    "curl_fopen.c",
+    "curl_get_line.c",
+    "curl_gethostname.c",
+    "curl_gssapi.c",
+    "curl_memrchr.c",
+    "curl_ntlm_core.c",
+    "curl_range.c",
+    "curl_sasl.c",
+    "curl_sha512_256.c",
+    "curl_share.c",
+    "curl_sspi.c",
+    "curl_threads.c",
+    "curl_trc.c",
+    "curlx/base64.c",
+    "curlx/basename.c",
+    "curlx/dynbuf.c",
+    "curlx/fopen.c",
+    "curlx/inet_ntop.c",
+    "curlx/inet_pton.c",
+    "curlx/multibyte.c",
+    "curlx/nonblock.c",
+    "curlx/snprintf.c",
+    "curlx/strcopy.c",
+    "curlx/strdup.c",
+    "curlx/strerr.c",
+    "curlx/strparse.c",
+    "curlx/timediff.c",
+    "curlx/timeval.c",
+    "curlx/version_win32.c",
+    "curlx/wait.c",
+    "curlx/warnless.c",
+    "curlx/winapi.c",
+    "cw-out.c",
+    "cw-pause.c",
+    "dict.c",
+    "dllmain.c",
+    "dynhds.c",
+    "easy.c",
+    "easygetopt.c",
+    "easyoptions.c",
+    "escape.c",
+    "fake_addrinfo.c",
+    "file.c",
+    "fileinfo.c",
+    "formdata.c",
+    "ftp.c",
+    "ftplistparser.c",
+    "getenv.c",
+    "getinfo.c",
+    "gopher.c",
+    "hash.c",
+    "headers.c",
+    "hmac.c",
+    "hsts.c",
+    "http.c",
+    "http1.c",
+    "http2.c",
+    "http_aws_sigv4.c",
+    "http_chunks.c",
+    "http_digest.c",
+    "http_httpsig.c",
+    "http_negotiate.c",
+    "http_ntlm.c",
+    "http_proxy.c",
+    "idn.c",
+    "if2ip.c",
+    "imap.c",
+    "ldap.c",
+    "llist.c",
+    "macos.c",
+    "md4.c",
+    "md5.c",
+    "memdebug.c",
+    "mime.c",
+    "mprintf.c",
+    "mqtt.c",
+    "multi.c",
+    "multi_ev.c",
+    "multi_ntfy.c",
+    "netrc.c",
+    "openldap.c",
+    "parsedate.c",
+    "peer.c",
+    "pingpong.c",
+    "pop3.c",
+    "progress.c",
+    "protocol.c",
+    "proxy.c",
+    "psl.c",
+    "rand.c",
+    "ratelimit.c",
+    "request.c",
+    "rtsp.c",
+    "select.c",
+    "sendf.c",
+    "setopt.c",
+    "sha256.c",
+    "slist.c",
+    "smb.c",
+    "smtp.c",
+    "socketpair.c",
+    "socks.c",
+    "socks_gssapi.c",
+    "socks_sspi.c",
+    "splay.c",
+    "strcase.c",
+    "strequal.c",
+    "strerror.c",
+    "system_win32.c",
+    "telnet.c",
+    "tftp.c",
+    "thrdpool.c",
+    "thrdqueue.c",
+    "transfer.c",
+    "uint-bset.c",
+    "uint-hash.c",
+    "uint-hashset.c",
+    "uint-spbset.c",
+    "uint-table.c",
+    "url.c",
+    "urlapi.c",
+    "vauth/cleartext.c",
+    "vauth/cram.c",
+    "vauth/digest.c",
+    "vauth/digest_sspi.c",
+    "vauth/gsasl.c",
+    "vauth/krb5_gssapi.c",
+    "vauth/krb5_sspi.c",
+    "vauth/ntlm.c",
+    "vauth/ntlm_sspi.c",
+    "vauth/oauth2.c",
+    "vauth/spnego_gssapi.c",
+    "vauth/spnego_sspi.c",
+    "vauth/vauth.c",
+    "vdns/asyn-ares.c",
+    "vdns/asyn-base.c",
+    "vdns/asyn-thrdd.c",
+    "vdns/cf-dns.c",
+    "vdns/dnscache.c",
+    "vdns/doh.c",
+    "vdns/hostip.c",
+    "vdns/hostip4.c",
+    "vdns/hostip6.c",
+    "vdns/httpsrr.c",
+    "version.c",
+    "vquic/capsule.c",
+    "vquic/cf-capsule.c",
+    "vquic/cf-ngtcp2-cmn.c",
+    "vquic/cf-ngtcp2-proxy.c",
+    "vquic/cf-ngtcp2.c",
+    "vquic/cf-quiche.c",
+    "vquic/vquic-tls.c",
+    "vquic/vquic.c",
+    "vssh/libssh.c",
+    "vssh/libssh2.c",
+    "vssh/vssh.c",
+    "vtls/apple.c",
+    "vtls/cipher_suite.c",
+    "vtls/gtls.c",
+    "vtls/hostcheck.c",
+    "vtls/keylog.c",
+    "vtls/mbedtls.c",
+    "vtls/openssl.c",
+    "vtls/rustls.c",
+    "vtls/schannel.c",
+    "vtls/schannel_verify.c",
+    "vtls/vtls.c",
+    "vtls/vtls_config.c",
+    "vtls/vtls_scache.c",
+    "vtls/vtls_spack.c",
+    "vtls/wolfssl.c",
+    "vtls/x509asn1.c",
+    "ws.c",
+};
+
 fn makeCFlags(
     b: *std.Build,
     base_flags: []const []const u8,
@@ -113,6 +312,46 @@ fn createCModule(
     return module;
 }
 
+fn createCurlLibrary(
+    b: *std.Build,
+    dependency: *std.Build.Dependency,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    if (target.result.os.tag != .linux) {
+        @panic("the first-party libcurl configuration currently supports Linux targets only");
+    }
+
+    const module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .pic = true,
+    });
+    module.addIncludePath(b.path("include"));
+    module.addIncludePath(dependency.path("include"));
+    module.addIncludePath(dependency.path("lib"));
+    module.addCMacro("BUILDING_LIBCURL", "1");
+    module.addCMacro("CURL_STATICLIB", "1");
+    module.addCMacro("CURL_HIDDEN_SYMBOLS", "1");
+    module.addCMacro("HAVE_CONFIG_H", "1");
+    module.addCSourceFiles(.{
+        .root = dependency.path("lib"),
+        .files = &curl_files,
+        .flags = &.{
+            "-std=c23",
+            "-D_GNU_SOURCE=1",
+            "-fvisibility=hidden",
+        },
+    });
+
+    return b.addLibrary(.{
+        .name = "curl",
+        .linkage = .static,
+        .root_module = module,
+    });
+}
+
 fn addCFiles(
     b: *std.Build,
     module: *std.Build.Module,
@@ -150,6 +389,13 @@ fn linkOptionalLibrary(
     if (library) |enabled_library| {
         module.linkLibrary(enabled_library);
     }
+}
+
+fn linkStaticSystemLibrary(module: *std.Build.Module, name: []const u8) void {
+    module.linkSystemLibrary(name, .{
+        .preferred_link_mode = .static,
+        .search_strategy = .no_fallback,
+    });
 }
 
 fn addRunStep(
@@ -218,21 +464,13 @@ pub fn build(b: *std.Build) void {
         b.lazyDependency("mimalloc", .{}) orelse return
     else
         null;
-    _ = b.systemIntegrationOption("openssl", .{ .default = true });
-    const curl_dependency = b.dependency("curl", .{
-        .target = target,
-        .optimize = .ReleaseFast,
-        .linkage = .dynamic,
-        .@"use-wolfssl" = false,
-        .@"use-openssl" = true,
-        .libpsl = false,
-        .libssh2 = false,
-        .libidn2 = false,
-        .nghttp2 = false,
-        .zlib = false,
-        .@"http-only" = true,
-    });
-    const curl_library = curl_package.artifact(curl_dependency, .lib);
+    const curl_dependency = b.dependency("curl", .{});
+    const curl_library = createCurlLibrary(
+        b,
+        curl_dependency,
+        target,
+        .ReleaseFast,
+    );
 
     const no_component_flags = &[_][]const u8{};
     const c_component_flags = if (use_mimalloc)
@@ -359,7 +597,7 @@ pub fn build(b: *std.Build) void {
     );
     addCFiles(b, type_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     type_test_module.linkLibrary(websocket_library);
-    type_test_module.linkSystemLibrary("wolfssl", .{});
+    linkStaticSystemLibrary(type_test_module, "wolfssl");
     const type_test = b.addExecutable(.{
         .name = "type_safety_test",
         .root_module = type_test_module,
@@ -382,6 +620,7 @@ pub fn build(b: *std.Build) void {
     }, project_posix_c_flags);
     addCFiles(b, http_config_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     http_config_test_module.linkLibrary(curl_library);
+    linkStaticSystemLibrary(http_config_test_module, "wolfssl");
     const http_config_test = b.addExecutable(.{
         .name = "http_transmitter_config_test",
         .root_module = http_config_test_module,
@@ -403,6 +642,7 @@ pub fn build(b: *std.Build) void {
     }, project_posix_c_flags);
     addCFiles(b, http_webhook_test_module, &.{"src/ulog.c"}, ulog_c_flags);
     http_webhook_test_module.linkLibrary(curl_library);
+    linkStaticSystemLibrary(http_webhook_test_module, "wolfssl");
     const http_webhook_test = b.addExecutable(.{
         .name = "http_transmitter_webhook_test",
         .root_module = http_webhook_test_module,
@@ -436,8 +676,8 @@ pub fn build(b: *std.Build) void {
         monitor_module.addIncludePath(dependency.path("include"));
     }
     monitor_module.linkLibrary(websocket_library);
-    monitor_module.linkSystemLibrary("uv", .{});
-    monitor_module.linkSystemLibrary("wolfssl", .{});
+    linkStaticSystemLibrary(monitor_module, "uv");
+    linkStaticSystemLibrary(monitor_module, "wolfssl");
     linkOptionalLibrary(monitor_module, mimalloc_library);
 
     const monitor = addExecutable(b, "eth_mempool_monitor", monitor_module, enable_hardening);
@@ -461,7 +701,7 @@ pub fn build(b: *std.Build) void {
     if (mimalloc_dependency) |dependency| {
         rabbitmq_console_module.addIncludePath(dependency.path("include"));
     }
-    rabbitmq_console_module.linkSystemLibrary("wolfssl", .{});
+    linkStaticSystemLibrary(rabbitmq_console_module, "wolfssl");
     linkOptionalLibrary(rabbitmq_console_module, mimalloc_library);
 
     const rabbitmq_console = addExecutable(
@@ -500,7 +740,7 @@ pub fn build(b: *std.Build) void {
         http_transmitter_module.addIncludePath(dependency.path("include"));
     }
     http_transmitter_module.linkLibrary(curl_library);
-    http_transmitter_module.linkSystemLibrary("wolfssl", .{});
+    linkStaticSystemLibrary(http_transmitter_module, "wolfssl");
     linkOptionalLibrary(http_transmitter_module, mimalloc_library);
 
     const http_transmitter = addExecutable(
@@ -509,10 +749,6 @@ pub fn build(b: *std.Build) void {
         http_transmitter_module,
         enable_hardening,
     );
-    http_transmitter.each_lib_rpath = false;
-    http_transmitter.root_module.addRPathSpecial("$ORIGIN");
-    http_transmitter.root_module.addRPathSpecial("$ORIGIN/../lib");
-    b.installArtifact(curl_library);
     addRunStep(
         b,
         http_transmitter,
@@ -533,7 +769,7 @@ pub fn build(b: *std.Build) void {
     if (mimalloc_dependency) |dependency| {
         rpc_control_module.addIncludePath(dependency.path("include"));
     }
-    rpc_control_module.linkSystemLibrary("uv", .{});
+    linkStaticSystemLibrary(rpc_control_module, "uv");
     linkOptionalLibrary(rpc_control_module, mimalloc_library);
 
     const rpc_control = addExecutable(b, "rpc_control", rpc_control_module, enable_hardening);

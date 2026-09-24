@@ -20,7 +20,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             libc6-dev \
-            libssl-dev \
             libuv1-dev \
             libwolfssl-dev \
             pkg-config
@@ -46,6 +45,11 @@ jobs:
               echo "::error file=${path}::found non-baseline YMM/ZMM instructions"
               exit 1
             fi
+            if readelf -d "${path}" | grep -Eq \
+              'Shared library: \[(libcurl|libssl|libcrypto|libwolfssl|libuv)\.so'; then
+              echo "::error file=${path}::found a dynamic third-party dependency"
+              exit 1
+            fi
             "${path}" --help >/dev/null
           done
       - name: Prepare release assets
@@ -58,7 +62,6 @@ jobs:
             release-assets/rabbitmq_tx_console-linux-x86_64
           install -m 0755 zig-out/bin/http_transmitter \
             release-assets/http_transmitter-linux-x86_64
-          install -m 0755 zig-out/lib/libcurl.so release-assets/libcurl.so
           install -m 0755 zig-out/bin/rpc_control \
             release-assets/rpc_control-linux-x86_64
           cd release-assets

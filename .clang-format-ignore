@@ -3,6 +3,7 @@
 zig-out/**
 zig-pkg/**
 include/hiredis/**
+include/curl_config.h
 include/jsonrpc/**
 include/parg/**
 include/parson/**
