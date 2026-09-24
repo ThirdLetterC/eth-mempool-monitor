@@ -9,7 +9,6 @@
 constexpr amqp_channel_t WS_RABBITMQ_DEFAULT_CHANNEL = 1;
 constexpr uint16_t WS_RABBITMQ_DEFAULT_HEARTBEAT_SECONDS = 30;
 constexpr char WS_RABBITMQ_CONTENT_TYPE[] = "application/json";
-constexpr uint32_t WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS = 3;
 
 /*
  * Publisher lifecycle trust boundary:
@@ -56,6 +55,23 @@ ws_rabbitmq_cleanup_owned_fields(ws_rabbitmq_publisher_t *publisher) {
   publisher->password = nullptr;
   publisher->vhost = nullptr;
   publisher->queue = nullptr;
+}
+
+static void
+ws_rabbitmq_cleanup_worker_resources(ws_rabbitmq_publisher_t *publisher) {
+  if (publisher == nullptr) {
+    return;
+  }
+  ws_rabbitmq_worker_stop(publisher);
+  ws_rabbitmq_replay_clear(publisher);
+  if (publisher->condition_initialized) {
+    uv_cond_destroy(&publisher->startup_condition);
+    publisher->condition_initialized = false;
+  }
+  if (publisher->mutex_initialized) {
+    uv_mutex_destroy(&publisher->queue_mutex);
+    publisher->mutex_initialized = false;
+  }
 }
 
 [[nodiscard]] ws_rabbitmq_publisher_t *
@@ -112,8 +128,8 @@ ws_rabbitmq_publisher_create(const ws_rabbitmq_config_t *config) {
       publisher->queue_durable ? AMQP_DELIVERY_PERSISTENT
                                : AMQP_DELIVERY_NONPERSISTENT;
 
-  if (!ws_rabbitmq_connection_open(publisher)) {
-    ws_rabbitmq_replay_clear(publisher);
+  if (!ws_rabbitmq_worker_start(publisher)) {
+    ws_rabbitmq_cleanup_worker_resources(publisher);
     ws_rabbitmq_cleanup_owned_fields(publisher);
     free(publisher);
     return nullptr;
@@ -128,77 +144,23 @@ ws_rabbitmq_publisher_publish(ws_rabbitmq_publisher_t *publisher,
   if (publisher == nullptr || payload == nullptr) {
     return false;
   }
-
-  if (publisher->replay_count == 0 &&
-      ws_rabbitmq_retry_allows_flush(publisher)) {
-    for (uint32_t attempt = 0; attempt < WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS;
-         ++attempt) {
-      if (ws_rabbitmq_connection_publish(publisher, payload, payload_length)) {
-        ws_rabbitmq_retry_record_success(publisher);
-        return true;
-      }
-
-      if (attempt + 1 < WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS) {
-        ulog_warn("RabbitMQ direct publish failed, retrying (attempt=%u/%u)",
-                  (unsigned)(attempt + 1),
-                  (unsigned)WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS);
-      }
-    }
-
-    if (!ws_rabbitmq_replay_enqueue(publisher, payload, payload_length) &&
-        publisher->replay_count == 0) {
-      ws_rabbitmq_retry_record_failure(publisher);
-      return false;
-    }
-
-    ulog_error(
-        "RabbitMQ publish failed after %u attempts; replay queue depth=%zu",
-        (unsigned)WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS, publisher->replay_count);
-    ws_rabbitmq_retry_record_failure(publisher);
+  if (!ws_rabbitmq_replay_enqueue(publisher, payload, payload_length)) {
     return false;
   }
-
-  bool enqueued =
-      ws_rabbitmq_replay_enqueue(publisher, payload, payload_length);
-  if (!enqueued && publisher->replay_count == 0) {
-    ws_rabbitmq_retry_record_failure(publisher);
+  int status = uv_async_send(&publisher->work_async);
+  if (status != 0) {
+    ulog_error("Failed to signal RabbitMQ publisher worker: %s",
+               uv_strerror(status));
     return false;
   }
-
-  if (!ws_rabbitmq_retry_allows_flush(publisher)) {
-    return false;
-  }
-
-  for (uint32_t attempt = 0; attempt < WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS;
-       ++attempt) {
-    if (ws_rabbitmq_replay_flush(publisher)) {
-      ws_rabbitmq_retry_record_success(publisher);
-      return true;
-    }
-
-    if (attempt + 1 < WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS) {
-      ulog_warn("RabbitMQ publish replay pending (%zu message%s), retrying "
-                "(attempt=%u/%u)",
-                publisher->replay_count,
-                publisher->replay_count == 1 ? "" : "s",
-                (unsigned)(attempt + 1),
-                (unsigned)WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS);
-    }
-  }
-
-  ulog_error(
-      "RabbitMQ publish failed after %u attempts; replay queue depth=%zu",
-      (unsigned)WS_RABBITMQ_PUBLISH_RETRY_ATTEMPTS, publisher->replay_count);
-  ws_rabbitmq_retry_record_failure(publisher);
-  return false;
+  return true;
 }
 
 void ws_rabbitmq_publisher_destroy(ws_rabbitmq_publisher_t *publisher) {
   if (publisher == nullptr) {
     return;
   }
-  ws_rabbitmq_connection_close(publisher);
-  ws_rabbitmq_replay_clear(publisher);
+  ws_rabbitmq_cleanup_worker_resources(publisher);
   ws_rabbitmq_cleanup_owned_fields(publisher);
   free(publisher);
 }

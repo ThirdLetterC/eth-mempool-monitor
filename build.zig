@@ -312,9 +312,6 @@ pub fn build(b: *std.Build) void {
         "src/parg.c",
         "src/toml.c",
         "src/parson.c",
-        "src/rabbitmq_publisher.c",
-        "src/rabbitmq_publisher_connection.c",
-        "src/rabbitmq_publisher_replay.c",
         "src/subscriber.c",
         "src/subscriber_message.c",
         "src/main.c",
@@ -322,6 +319,10 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, monitor_module, &.{
         "src/monitor_config.c",
         "src/monitor_runtime.c",
+        "src/rabbitmq_publisher.c",
+        "src/rabbitmq_publisher_connection.c",
+        "src/rabbitmq_publisher_replay.c",
+        "src/rabbitmq_publisher_worker.c",
     }, project_posix_c_flags);
     addCFiles(b, monitor_module, &.{"src/ulog.c"}, ulog_c_flags);
     addCFiles(b, monitor_module, &hiredis_files, hiredis_c_flags);
@@ -330,6 +331,7 @@ pub fn build(b: *std.Build) void {
         monitor_module.addIncludePath(dependency.path("include"));
     }
     monitor_module.linkLibrary(websocket_library);
+    monitor_module.linkSystemLibrary("uv", .{});
     monitor_module.linkSystemLibrary("wolfssl", .{});
     linkOptionalLibrary(monitor_module, mimalloc_library);
 

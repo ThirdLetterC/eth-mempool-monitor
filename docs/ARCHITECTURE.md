@@ -44,8 +44,13 @@ When a monitored address matches `from` or `to`, the monitor publishes JSON like
 }
 ```
 
-Publishing uses RabbitMQ publisher confirms with in-process replay retries,
-providing at-least-once delivery semantics.
+Publishing is asynchronous. The subscriber copies matched events into a
+bounded ring and signals a dedicated libuv event loop. Its worker thread owns
+the RabbitMQ connection, publishes up to 128 messages before draining
+publisher confirms, and schedules reconnect backoff with a libuv timer.
+Unconfirmed batches remain at the ring head for replay, providing at-least-once
+delivery semantics. Queue admission, rather than broker confirmation, is the
+success boundary returned to the subscriber.
 
 ## Algorithmic Complexity
 
@@ -65,17 +70,17 @@ Symbols used below:
 | Normalize `from` and `to` | `O(1)` | `O(1)` | Handles at most two fixed-length addresses. |
 | Redis membership checks | `O(1)` local CPU | `O(1)` | Runs at most two `SISMEMBER` commands. |
 | Build and serialize event | `O(t)` | `O(t)` | Copies the transaction JSON into the event. |
-| Enqueue RabbitMQ replay | `O(t)` | `O(t)` | Copies the payload while replay/backoff is active. |
-| Flush RabbitMQ replay | `O(q + sum(payload_i))` worst case | `O(1)` | Drains a ring buffer without per-pop shifts. |
+| Enqueue RabbitMQ publish | `O(t)` | `O(t)` | Copies into a bounded, preallocated descriptor ring. |
+| Flush RabbitMQ batch | `O(b + sum(payload_i))` | `O(b)` | Publishes and confirms at most 128 messages per batch. |
 
-Typical steady-state CPU work is `O(n + p + t)`. Because `p` is capped at
-1024, this is effectively `O(n + t)`. During a broker backlog, replay draining
-can dominate at `O(n + p + q + sum(payload_i))`.
+Typical subscriber CPU work is `O(n + p + t)`. Because `p` is capped at 1024,
+this is effectively `O(n + t)`. Broker I/O and confirm latency overlap with
+subscriber ingestion on the publisher worker.
 
 Fixed storage includes the 64 KiB receive buffer and 1024 lookup entries.
-Dynamic storage is dominated by parsed JSON (`O(n)`), serialized events (`O(t)`),
-and queued replay payloads. The replay queue is capped at both 4096 messages and
-64 MiB of payload data.
+Dynamic storage is dominated by parsed JSON (`O(n)`), serialized events
+(`O(t)`), and queued publish payloads. The outbound queue preallocates 4096
+descriptors and is capped at 64 MiB of payload data.
 
 The RPC server accepts at most 256 concurrent clients. Each client may queue at
 most 64 writes or 512 KiB of response data before the connection is closed.

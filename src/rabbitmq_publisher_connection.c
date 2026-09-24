@@ -7,9 +7,12 @@
 #include <sys/time.h>
 
 constexpr uint32_t WS_RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS = 3'000;
+constexpr size_t WS_RABBITMQ_MAX_PUBLISH_BATCH = 128;
 
 [[nodiscard]] static bool
-ws_rabbitmq_wait_for_publish_confirm(ws_rabbitmq_publisher_t *publisher);
+ws_rabbitmq_wait_for_batch_confirms(ws_rabbitmq_publisher_t *publisher,
+                                    uint64_t first_sequence,
+                                    size_t message_count);
 
 /*
  * Broker trust boundary:
@@ -91,40 +94,12 @@ void ws_rabbitmq_connection_close(ws_rabbitmq_publisher_t *publisher) {
   publisher->connection = nullptr;
 }
 
-[[nodiscard]] bool
-ws_rabbitmq_connection_publish(ws_rabbitmq_publisher_t *publisher,
-                               const char *payload, size_t payload_length) {
-  if (publisher == nullptr || payload == nullptr) {
-    return false;
-  }
-
-  if (publisher->connection == nullptr &&
-      !ws_rabbitmq_connection_open(publisher)) {
-    return false;
-  }
-
-  auto publish_status = amqp_basic_publish(
-      publisher->connection, publisher->channel, amqp_empty_bytes,
-      publisher->queue_bytes, false, false, &publisher->publish_properties,
-      amqp_bytes_from_buffer(payload, payload_length));
-  if (publish_status != AMQP_STATUS_OK) {
-    ulog_error("RabbitMQ publish failed: %s",
-               amqp_error_string2(publish_status));
-    ws_rabbitmq_connection_close(publisher);
-    return false;
-  }
-
-  if (!ws_rabbitmq_wait_for_publish_confirm(publisher)) {
-    ws_rabbitmq_connection_close(publisher);
-    return false;
-  }
-
-  return true;
-}
-
 [[nodiscard]] static bool
-ws_rabbitmq_wait_for_publish_confirm(ws_rabbitmq_publisher_t *publisher) {
-  if (publisher == nullptr || publisher->connection == nullptr) {
+ws_rabbitmq_wait_for_batch_confirms(ws_rabbitmq_publisher_t *publisher,
+                                    uint64_t first_sequence,
+                                    size_t message_count) {
+  if (publisher == nullptr || publisher->connection == nullptr ||
+      message_count == 0 || message_count > WS_RABBITMQ_MAX_PUBLISH_BATCH) {
     return false;
   }
 
@@ -135,35 +110,92 @@ ws_rabbitmq_wait_for_publish_confirm(ws_rabbitmq_publisher_t *publisher) {
                         1000U),
   };
 
-  amqp_publisher_confirm_t confirm = {0};
-  amqp_rpc_reply_t reply =
-      amqp_publisher_confirm_wait(publisher->connection, &timeout, &confirm);
-  if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
-    ws_rabbitmq_log_rpc_failure("publisher confirm wait", reply);
+  bool confirmed[WS_RABBITMQ_MAX_PUBLISH_BATCH] = {false};
+  size_t confirmed_count = 0;
+  uint64_t last_sequence = first_sequence + message_count - 1;
+  while (confirmed_count < message_count) {
+    amqp_publisher_confirm_t confirm = {0};
+    amqp_rpc_reply_t reply =
+        amqp_publisher_confirm_wait(publisher->connection, &timeout, &confirm);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+      ws_rabbitmq_log_rpc_failure("publisher confirm wait", reply);
+      return false;
+    }
+    if (confirm.channel != publisher->channel) {
+      ulog_error("RabbitMQ publish confirm arrived on unexpected channel=%u",
+                 (unsigned)confirm.channel);
+      return false;
+    }
+    if (confirm.method != AMQP_BASIC_ACK_METHOD) {
+      ulog_error("RabbitMQ publish batch was %s by broker",
+                 confirm.method == AMQP_BASIC_NACK_METHOD ? "nacked"
+                                                          : "rejected");
+      return false;
+    }
+
+    uint64_t delivery_tag = confirm.payload.ack.delivery_tag;
+    bool multiple = confirm.payload.ack.multiple != 0;
+    if (multiple && delivery_tag == 0) {
+      delivery_tag = last_sequence;
+    }
+    if (delivery_tag < first_sequence || delivery_tag > last_sequence) {
+      ulog_error("RabbitMQ publish confirm has unexpected sequence=%llu "
+                 "(expected=%llu..%llu)",
+                 (unsigned long long)delivery_tag,
+                 (unsigned long long)first_sequence,
+                 (unsigned long long)last_sequence);
+      return false;
+    }
+
+    size_t final_index = (size_t)(delivery_tag - first_sequence);
+    size_t initial_index = multiple ? 0 : final_index;
+    for (size_t index = initial_index; index <= final_index; ++index) {
+      if (!confirmed[index]) {
+        confirmed[index] = true;
+        confirmed_count += 1;
+      }
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool ws_rabbitmq_connection_publish_batch(
+    ws_rabbitmq_publisher_t *publisher,
+    const ws_rabbitmq_replay_message_t *const *messages, size_t message_count) {
+  if (publisher == nullptr || messages == nullptr || message_count == 0 ||
+      message_count > WS_RABBITMQ_MAX_PUBLISH_BATCH) {
+    return false;
+  }
+  if (publisher->connection == nullptr &&
+      !ws_rabbitmq_connection_open(publisher)) {
     return false;
   }
 
-  if (confirm.channel != publisher->channel) {
-    ulog_error("RabbitMQ publish confirm arrived on unexpected channel=%u",
-               (unsigned)confirm.channel);
-    return false;
+  uint64_t first_sequence = publisher->next_publish_sequence;
+  for (size_t i = 0; i < message_count; ++i) {
+    const ws_rabbitmq_replay_message_t *message = messages[i];
+    if (message == nullptr || message->payload == nullptr) {
+      return false;
+    }
+    auto publish_status = amqp_basic_publish(
+        publisher->connection, publisher->channel, amqp_empty_bytes,
+        publisher->queue_bytes, false, false, &publisher->publish_properties,
+        amqp_bytes_from_buffer(message->payload, message->payload_length));
+    if (publish_status != AMQP_STATUS_OK) {
+      ulog_error("RabbitMQ publish failed: %s",
+                 amqp_error_string2(publish_status));
+      ws_rabbitmq_connection_close(publisher);
+      return false;
+    }
+    publisher->next_publish_sequence += 1;
   }
 
-  if (confirm.method == AMQP_BASIC_ACK_METHOD) {
-    return true;
-  }
-  if (confirm.method == AMQP_BASIC_NACK_METHOD) {
-    ulog_error("RabbitMQ publish was nacked by broker");
+  if (!ws_rabbitmq_wait_for_batch_confirms(publisher, first_sequence,
+                                           message_count)) {
+    ws_rabbitmq_connection_close(publisher);
     return false;
   }
-  if (confirm.method == AMQP_BASIC_REJECT_METHOD) {
-    ulog_error("RabbitMQ publish was rejected by broker");
-    return false;
-  }
-
-  ulog_error("RabbitMQ publish confirm returned unexpected method=0x%08X",
-             confirm.method);
-  return false;
+  return true;
 }
 
 [[nodiscard]] bool
@@ -175,6 +207,7 @@ ws_rabbitmq_connection_open(ws_rabbitmq_publisher_t *publisher) {
   ws_rabbitmq_connection_close(publisher);
   publisher->logged_in = false;
   publisher->channel_open = false;
+  publisher->next_publish_sequence = 1;
 
   publisher->connection = amqp_new_connection();
   if (publisher->connection == nullptr) {

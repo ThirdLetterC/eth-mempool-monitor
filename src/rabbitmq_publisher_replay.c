@@ -15,22 +15,23 @@ constexpr uint32_t WS_RABBITMQ_RETRY_INITIAL_BACKOFF_MS = 1'000;
 constexpr uint32_t WS_RABBITMQ_RETRY_MAX_BACKOFF_MS = 60'000;
 
 /*
- * Replay-queue trust boundary:
- * Payload size and broker availability are externally influenced. Queue growth
- * is bounded, allocation sizes are checked, and retry backoff is capped.
+ * Queue trust boundary:
+ * Payload size and broker availability are externally influenced. Descriptor
+ * storage is allocated once, byte growth is bounded, and every payload copy is
+ * released only after broker confirmation or publisher destruction.
  */
 
 [[nodiscard]] static uint64_t ws_rabbitmq_now_milliseconds() {
   struct timeval tv = {0};
   if (gettimeofday(&tv, nullptr) == 0) {
-    return (uint64_t)tv.tv_sec * 1000U + (uint64_t)tv.tv_usec / 1000U;
+    return (uint64_t)tv.tv_sec * 1'000U + (uint64_t)tv.tv_usec / 1'000U;
   }
 
   time_t now = time(nullptr);
   if (now < 0) {
     return 0;
   }
-  return (uint64_t)now * 1000U;
+  return (uint64_t)now * 1'000U;
 }
 
 [[nodiscard]] bool
@@ -51,11 +52,23 @@ ws_rabbitmq_retry_allows_flush(ws_rabbitmq_publisher_t *publisher) {
   if (publisher->skipped_flush_attempts > 0) {
     ulog_info(
         "RabbitMQ publish retrying after cooldown (queued=%zu skipped=%u)",
-        publisher->replay_count, (unsigned)publisher->skipped_flush_attempts);
+        ws_rabbitmq_replay_count(publisher),
+        (unsigned)publisher->skipped_flush_attempts);
     publisher->skipped_flush_attempts = 0;
   }
 
   return true;
+}
+
+[[nodiscard]] uint64_t
+ws_rabbitmq_retry_delay_ms(ws_rabbitmq_publisher_t *publisher) {
+  if (publisher == nullptr || publisher->retry_not_before_ms == 0) {
+    return 0;
+  }
+  uint64_t now_ms = ws_rabbitmq_now_milliseconds();
+  return now_ms < publisher->retry_not_before_ms
+             ? publisher->retry_not_before_ms - now_ms
+             : 0;
 }
 
 void ws_rabbitmq_retry_record_failure(ws_rabbitmq_publisher_t *publisher) {
@@ -77,7 +90,8 @@ void ws_rabbitmq_retry_record_failure(ws_rabbitmq_publisher_t *publisher) {
       ws_rabbitmq_now_milliseconds() + publisher->retry_backoff_ms;
   ulog_warn("RabbitMQ unavailable, backing off publish attempts for %u ms "
             "(queued=%zu)",
-            (unsigned)publisher->retry_backoff_ms, publisher->replay_count);
+            (unsigned)publisher->retry_backoff_ms,
+            ws_rabbitmq_replay_count(publisher));
 }
 
 void ws_rabbitmq_retry_record_success(ws_rabbitmq_publisher_t *publisher) {
@@ -87,23 +101,29 @@ void ws_rabbitmq_retry_record_success(ws_rabbitmq_publisher_t *publisher) {
 
   if (publisher->retry_backoff_ms > 0) {
     ulog_info("RabbitMQ publish path recovered (queued=%zu)",
-              publisher->replay_count);
+              ws_rabbitmq_replay_count(publisher));
   }
   publisher->retry_not_before_ms = 0;
   publisher->retry_backoff_ms = 0;
   publisher->skipped_flush_attempts = 0;
 }
 
+[[nodiscard]] bool
+ws_rabbitmq_replay_initialize(ws_rabbitmq_publisher_t *publisher) {
+  if (publisher == nullptr) {
+    return false;
+  }
+  publisher->replay_queue =
+      calloc(WS_RABBITMQ_MAX_REPLAY_MESSAGES, sizeof(*publisher->replay_queue));
+  if (publisher->replay_queue == nullptr) {
+    return false;
+  }
+  publisher->replay_capacity = WS_RABBITMQ_MAX_REPLAY_MESSAGES;
+  return true;
+}
+
 void ws_rabbitmq_replay_clear(ws_rabbitmq_publisher_t *publisher) {
   if (publisher == nullptr || publisher->replay_queue == nullptr) {
-    return;
-  }
-  if (publisher->replay_capacity == 0) {
-    free(publisher->replay_queue);
-    publisher->replay_queue = nullptr;
-    publisher->replay_count = 0;
-    publisher->replay_bytes = 0;
-    publisher->replay_head = 0;
     return;
   }
   for (size_t i = 0; i < publisher->replay_count; ++i) {
@@ -118,72 +138,11 @@ void ws_rabbitmq_replay_clear(ws_rabbitmq_publisher_t *publisher) {
   publisher->replay_head = 0;
 }
 
-[[nodiscard]] static bool
-ws_rabbitmq_reserve_replay_capacity(ws_rabbitmq_publisher_t *publisher,
-                                    size_t new_capacity) {
-  if (publisher == nullptr) {
-    return false;
-  }
-  if (new_capacity <= publisher->replay_capacity) {
-    return true;
-  }
-  if (new_capacity > SIZE_MAX / sizeof(*publisher->replay_queue)) {
-    return false;
-  }
-
-  auto resized = (ws_rabbitmq_replay_message_t *)calloc(
-      new_capacity, sizeof(*publisher->replay_queue));
-  if (resized == nullptr) {
-    return false;
-  }
-
-  for (size_t i = 0; i < publisher->replay_count; ++i) {
-    size_t index = (publisher->replay_head + i) % publisher->replay_capacity;
-    resized[i] = publisher->replay_queue[index];
-  }
-  free(publisher->replay_queue);
-
-  publisher->replay_queue = resized;
-  publisher->replay_capacity = new_capacity;
-  publisher->replay_head = 0;
-  return true;
-}
-
-[[nodiscard]] static ws_rabbitmq_replay_message_t *
-ws_rabbitmq_replay_head_message(ws_rabbitmq_publisher_t *publisher) {
-  if (publisher == nullptr || publisher->replay_count == 0 ||
-      publisher->replay_queue == nullptr ||
-      publisher->replay_head >= publisher->replay_capacity) {
-    return nullptr;
-  }
-  return &publisher->replay_queue[publisher->replay_head];
-}
-
 [[nodiscard]] bool
 ws_rabbitmq_replay_enqueue(ws_rabbitmq_publisher_t *publisher,
                            const char *payload, size_t payload_length) {
-  if (publisher == nullptr || payload == nullptr) {
-    return false;
-  }
-
-  size_t next_replay_bytes = 0;
-  bool byte_limit_exceeded =
-      ckd_add(&next_replay_bytes, publisher->replay_bytes, payload_length) ||
-      next_replay_bytes > WS_RABBITMQ_MAX_REPLAY_BYTES;
-  if (publisher->replay_count >= WS_RABBITMQ_MAX_REPLAY_MESSAGES ||
-      byte_limit_exceeded) {
-    if (publisher->replay_queue_dropped_messages < UINT64_MAX) {
-      publisher->replay_queue_dropped_messages += 1;
-    }
-    if (!publisher->replay_queue_full_logged) {
-      ulog_error(
-          "RabbitMQ replay queue limit reached (%zu messages, %zu bytes; "
-          "limits=%zu messages/%zu bytes), dropping publishes until broker "
-          "recovers",
-          publisher->replay_count, publisher->replay_bytes,
-          WS_RABBITMQ_MAX_REPLAY_MESSAGES, WS_RABBITMQ_MAX_REPLAY_BYTES);
-      publisher->replay_queue_full_logged = true;
-    }
+  if (publisher == nullptr || payload == nullptr ||
+      !publisher->mutex_initialized) {
     return false;
   }
 
@@ -191,39 +150,40 @@ ws_rabbitmq_replay_enqueue(ws_rabbitmq_publisher_t *publisher,
   if (ckd_add(&payload_capacity, payload_length, (size_t)1)) {
     return false;
   }
-
   char *payload_copy = calloc(payload_capacity, sizeof(char));
   if (payload_copy == nullptr) {
-    ulog_error("Failed to allocate replay payload copy");
+    ulog_error("Failed to allocate RabbitMQ payload copy");
     return false;
   }
   if (payload_length > 0) {
     memcpy(payload_copy, payload, payload_length);
   }
 
-  if (publisher->replay_count == publisher->replay_capacity) {
-    size_t new_capacity =
-        publisher->replay_capacity == 0 ? 32 : publisher->replay_capacity * 2;
-    if (new_capacity > WS_RABBITMQ_MAX_REPLAY_MESSAGES) {
-      new_capacity = WS_RABBITMQ_MAX_REPLAY_MESSAGES;
+  uv_mutex_lock(&publisher->queue_mutex);
+  size_t next_replay_bytes = 0;
+  bool byte_limit_exceeded =
+      ckd_add(&next_replay_bytes, publisher->replay_bytes, payload_length) ||
+      next_replay_bytes > WS_RABBITMQ_MAX_REPLAY_BYTES;
+  bool queue_full = publisher->stopping ||
+                    publisher->replay_count >= publisher->replay_capacity ||
+                    byte_limit_exceeded;
+  if (queue_full) {
+    if (publisher->replay_queue_dropped_messages < UINT64_MAX) {
+      publisher->replay_queue_dropped_messages += 1;
     }
-    if (new_capacity < publisher->replay_count) {
-      free(payload_copy);
-      return false;
+    bool should_log = !publisher->replay_queue_full_logged;
+    publisher->replay_queue_full_logged = true;
+    size_t queued_messages = publisher->replay_count;
+    size_t queued_bytes = publisher->replay_bytes;
+    uv_mutex_unlock(&publisher->queue_mutex);
+    free(payload_copy);
+    if (should_log) {
+      ulog_error("RabbitMQ outbound queue unavailable (%zu messages, %zu "
+                 "bytes; limits=%zu messages/%zu bytes)",
+                 queued_messages, queued_bytes, WS_RABBITMQ_MAX_REPLAY_MESSAGES,
+                 WS_RABBITMQ_MAX_REPLAY_BYTES);
     }
-
-    if (!ws_rabbitmq_reserve_replay_capacity(publisher, new_capacity)) {
-      free(payload_copy);
-      return false;
-    }
-  }
-
-  if (publisher->replay_queue_full_logged) {
-    ulog_warn("RabbitMQ replay queue accepts publishes again (dropped=%" PRIu64
-              ")",
-              publisher->replay_queue_dropped_messages);
-    publisher->replay_queue_full_logged = false;
-    publisher->replay_queue_dropped_messages = 0;
+    return false;
   }
 
   size_t index = (publisher->replay_head + publisher->replay_count) %
@@ -232,55 +192,73 @@ ws_rabbitmq_replay_enqueue(ws_rabbitmq_publisher_t *publisher,
       .payload = payload_copy, .payload_length = payload_length};
   publisher->replay_count += 1;
   publisher->replay_bytes = next_replay_bytes;
+  uv_mutex_unlock(&publisher->queue_mutex);
   return true;
 }
 
-static void ws_rabbitmq_drop_replay_head(ws_rabbitmq_publisher_t *publisher) {
-  if (publisher == nullptr || publisher->replay_count == 0 ||
-      publisher->replay_queue == nullptr) {
+[[nodiscard]] size_t
+ws_rabbitmq_replay_peek_batch(ws_rabbitmq_publisher_t *publisher,
+                              const ws_rabbitmq_replay_message_t **messages,
+                              size_t message_capacity) {
+  if (publisher == nullptr || messages == nullptr || message_capacity == 0) {
+    return 0;
+  }
+  uv_mutex_lock(&publisher->queue_mutex);
+  size_t count = publisher->replay_count < message_capacity
+                     ? publisher->replay_count
+                     : message_capacity;
+  for (size_t i = 0; i < count; ++i) {
+    size_t index = (publisher->replay_head + i) % publisher->replay_capacity;
+    messages[i] = &publisher->replay_queue[index];
+  }
+  uv_mutex_unlock(&publisher->queue_mutex);
+  return count;
+}
+
+void ws_rabbitmq_replay_drop_head(ws_rabbitmq_publisher_t *publisher,
+                                  size_t message_count) {
+  if (publisher == nullptr || message_count == 0) {
     return;
   }
-
-  size_t payload_length =
-      publisher->replay_queue[publisher->replay_head].payload_length;
-  free(publisher->replay_queue[publisher->replay_head].payload);
-  publisher->replay_queue[publisher->replay_head] =
-      (ws_rabbitmq_replay_message_t){0};
-  publisher->replay_head =
-      (publisher->replay_head + 1) % publisher->replay_capacity;
-  publisher->replay_count -= 1;
-  publisher->replay_bytes = payload_length <= publisher->replay_bytes
-                                ? publisher->replay_bytes - payload_length
-                                : 0;
-
-  if (publisher->replay_count == 0) {
-    free(publisher->replay_queue);
-    publisher->replay_queue = nullptr;
-    publisher->replay_capacity = 0;
-    publisher->replay_head = 0;
-    publisher->replay_bytes = 0;
+  uv_mutex_lock(&publisher->queue_mutex);
+  size_t drop_count = message_count < publisher->replay_count
+                          ? message_count
+                          : publisher->replay_count;
+  for (size_t i = 0; i < drop_count; ++i) {
+    auto message = &publisher->replay_queue[publisher->replay_head];
+    size_t payload_length = message->payload_length;
+    free(message->payload);
+    *message = (ws_rabbitmq_replay_message_t){0};
+    publisher->replay_head =
+        (publisher->replay_head + 1) % publisher->replay_capacity;
+    publisher->replay_count -= 1;
+    publisher->replay_bytes = payload_length <= publisher->replay_bytes
+                                  ? publisher->replay_bytes - payload_length
+                                  : 0;
+  }
+  bool queue_recovered =
+      publisher->replay_queue_full_logged &&
+      publisher->replay_count < publisher->replay_capacity / 2;
+  uint64_t dropped_messages = publisher->replay_queue_dropped_messages;
+  if (queue_recovered) {
+    publisher->replay_queue_full_logged = false;
+    publisher->replay_queue_dropped_messages = 0;
+  }
+  uv_mutex_unlock(&publisher->queue_mutex);
+  if (queue_recovered) {
+    ulog_warn(
+        "RabbitMQ outbound queue accepts publishes again (dropped=%" PRIu64 ")",
+        dropped_messages);
   }
 }
 
-[[nodiscard]] bool
-ws_rabbitmq_replay_flush(ws_rabbitmq_publisher_t *publisher) {
-  if (publisher == nullptr) {
-    return false;
+[[nodiscard]] size_t
+ws_rabbitmq_replay_count(ws_rabbitmq_publisher_t *publisher) {
+  if (publisher == nullptr || !publisher->mutex_initialized) {
+    return 0;
   }
-
-  while (publisher->replay_count > 0) {
-    ws_rabbitmq_replay_message_t *message =
-        ws_rabbitmq_replay_head_message(publisher);
-    if (message == nullptr) {
-      return false;
-    }
-    if (!ws_rabbitmq_connection_publish(publisher, message->payload,
-                                        message->payload_length)) {
-      return false;
-    }
-
-    ws_rabbitmq_drop_replay_head(publisher);
-  }
-
-  return true;
+  uv_mutex_lock(&publisher->queue_mutex);
+  size_t count = publisher->replay_count;
+  uv_mutex_unlock(&publisher->queue_mutex);
+  return count;
 }
