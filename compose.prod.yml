@@ -46,7 +46,7 @@ services:
     mem_limit: 6m
     mem_reservation: 6m
   valkey:
-    image: valkey/valkey:latest
+    image: docker.io/valkey/valkey:latest
     container_name: valkey
     ports:
       - "6379:6379"
@@ -83,7 +83,7 @@ services:
     mem_limit: 20m
     mem_reservation: 20m
   rabbitmq:
-    image: rabbitmq:3
+    image: docker.io/library/rabbitmq:3
     container_name: rabbitmq
     hostname: rabbitmq
     environment:

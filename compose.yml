@@ -1,6 +1,6 @@
 services:
   valkey:
-    image: valkey/valkey:latest
+    image: docker.io/valkey/valkey:latest
     container_name: valkey
     ports:
       - "6379:6379"
@@ -25,7 +25,7 @@ services:
       - --lazyfree-lazy-user-del
       - "yes"
   rabbitmq:
-    image: rabbitmq:3-management
+    image: docker.io/library/rabbitmq:3-management
     container_name: rabbitmq
     hostname: rabbitmq
     environment:
