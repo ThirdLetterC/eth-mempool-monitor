@@ -12,7 +12,7 @@
  * receive loop, and releases every successfully acquired resource on exit.
  * Message interpretation is isolated in subscriber_message.c.
  */
-constexpr size_t WS_SUBSCRIBER_MESSAGE_CAPACITY = 64 * 1024;
+constexpr size_t WS_SUBSCRIBER_MESSAGE_CAPACITY = 256 * 1'024;
 [[nodiscard]] static bool
 ws_subscriber_should_stop(const ws_subscriber_options_t *options) {
   return options->should_stop != nullptr && options->should_stop();

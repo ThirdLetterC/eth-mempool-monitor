@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. Release dates
 and links are based on the published [GitHub releases][releases]; change details
 are summarized from the commits contained in each tagged release.
 
+## [v1.2.3] - 2026-09-24
+
+### Added
+
+- Added a bounded-memory Binance proof-of-reserves importer that streams large
+  archives into monitor-compatible TOML address files.
+- Added `podman-compose` 1.6.0 to the locked development toolchain.
+
+### Fixed
+
+- Improved Podman compatibility for Compose image names and sysctl settings.
+- Increased the WebSocket subscriber receive buffer from 64 KiB to 256 KiB so
+  large pending-transaction notifications are not prematurely discarded.
+
 ## [v1.2.1] - 2026-09-24
 
 ### Fixed
@@ -87,3 +101,4 @@ are summarized from the commits contained in each tagged release.
 [v1.1.1]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.1.1
 [v1.2.0]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.0
 [v1.2.1]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.1
+[v1.2.3]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.3
