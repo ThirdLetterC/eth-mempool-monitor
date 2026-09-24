@@ -1,6 +1,4 @@
 #include "websocket-client/rabbitmq_tx_console_internal.h"
-#include "parson/parson.h"
-#include "toml/toml.h"
 #include "ulog/ulog.h"
 #include <errno.h>
 #include <signal.h>
@@ -8,6 +6,9 @@
 #include <string.h>
 #if defined(USE_MIMALLOC)
 #include <mimalloc.h>
+
+#include "parson/parson.h"
+#include "toml/toml.h"
 #endif
 
 /*

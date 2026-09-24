@@ -1,4 +1,3 @@
-#include "websocket-client/subscriber.h"
 #include "websocket-client/subscriber_internal.h"
 
 #include "hiredis/hiredis.h"

@@ -1,14 +1,15 @@
 #include "websocket-client/monitor_config.h"
 #include "websocket-client/monitor_runtime.h"
 
-#include "parson/parson.h"
-#include "toml/toml.h"
 #include "ulog/ulog.h"
 
 #include <stdlib.h>
 
 #if defined(USE_MIMALLOC)
 #include <mimalloc.h>
+
+#include "parson/parson.h"
+#include "toml/toml.h"
 #endif
 
 /*

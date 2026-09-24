@@ -7,7 +7,6 @@
  */
 
 #include "jsonrpc/jsonrpc.h"
-#include "jsonrpc/server.h"
 #include "rpc_control/config_internal.h"
 
 [[nodiscard]] bool

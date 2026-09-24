@@ -2,7 +2,6 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdckdint.h>
 #include <stdint.h>

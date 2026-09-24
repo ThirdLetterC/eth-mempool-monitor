@@ -166,6 +166,14 @@ void usage_example() {
 - When adding a runnable artifact, install it with `b.installArtifact(...)`, use `b.addRunArtifact(...)`, forward `b.args`, and expose a named `b.step(...)` consistent with the existing run steps.
 - `build.zig.zon` dependency hashes and the package fingerprint are integrity metadata. Do not edit them manually; use Zig package-management commands when a dependency or package identity genuinely changes.
 
+### clangd Include Hygiene
+- Run clangd's include-cleaner diagnostics over all first-party `.c` and `.h` files after changing source or header dependencies. Use the repository `compile_flags.txt` so clangd analyzes strict C23 with the same feature-test macros and include path as the build.
+- Collect clangd LSP `textDocument/publishDiagnostics` entries whose code is `unused-includes`; `clangd --check` validates parsing but may not emit include-cleaner diagnostics.
+- Remove headers reported by clangd as unused only after confirming the symbol is not required by a conditional build path. Move feature-specific headers inside their controlling `#if` block (for example, `USE_MIMALLOC`) instead of deleting headers needed when that feature is enabled.
+- Do not apply include-cleaner edits to vendored RabbitMQ, Hiredis, JSON-RPC, or other third-party sources unless the task explicitly authorizes vendor changes.
+- Avoid relying on transitive includes: each first-party source or header should directly include the header that owns every external type, macro, and function it uses.
+- After include cleanup, require zero clangd unused-include diagnostics and run `just check-c-format`, `zig build`, and every affected optional configuration. At minimum, verify `zig build -Dmimalloc=true` whenever conditional mimalloc includes are changed.
+
 ### wolfSSL Integration (Critical)
 - When using wolfSSL headers, include `wolfssl/options.h` **before** any `wolfssl/openssl/*` headers.
 - Required order pattern:

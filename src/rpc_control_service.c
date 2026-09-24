@@ -1,6 +1,5 @@
 #include <ctype.h>
 #include <inttypes.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdckdint.h>
 #include <stdint.h>
@@ -12,7 +11,6 @@
 
 #include "hiredis/hiredis.h"
 #include "jsonrpc/jsonrpc.h"
-#include "jsonrpc/server.h"
 #include "rpc_control/config_internal.h"
 #include "rpc_control/service_internal.h"
 #include "ulog/ulog.h"
