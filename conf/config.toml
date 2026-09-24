@@ -1,5 +1,5 @@
 [connection]
-host = "eth.drpc.org"
+host = "ethereum-rpc.publicnode.com"
 port = 443
 path = "/"
 secure = true
