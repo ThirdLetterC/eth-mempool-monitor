@@ -619,6 +619,7 @@ pub fn build(b: *std.Build) void {
         "src/http_transmitter_config.c",
     }, project_posix_c_flags);
     addCFiles(b, http_config_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    http_config_test_module.addIncludePath(curl_dependency.path("include"));
     http_config_test_module.linkLibrary(curl_library);
     linkStaticSystemLibrary(http_config_test_module, "wolfssl");
     const http_config_test = b.addExecutable(.{
@@ -641,6 +642,7 @@ pub fn build(b: *std.Build) void {
         "src/http_transmitter_webhook.c",
     }, project_posix_c_flags);
     addCFiles(b, http_webhook_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    http_webhook_test_module.addIncludePath(curl_dependency.path("include"));
     http_webhook_test_module.linkLibrary(curl_library);
     linkStaticSystemLibrary(http_webhook_test_module, "wolfssl");
     const http_webhook_test = b.addExecutable(.{
@@ -739,6 +741,7 @@ pub fn build(b: *std.Build) void {
     if (mimalloc_dependency) |dependency| {
         http_transmitter_module.addIncludePath(dependency.path("include"));
     }
+    http_transmitter_module.addIncludePath(curl_dependency.path("include"));
     http_transmitter_module.linkLibrary(curl_library);
     linkStaticSystemLibrary(http_transmitter_module, "wolfssl");
     linkOptionalLibrary(http_transmitter_module, mimalloc_library);
