@@ -19,7 +19,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            libc6-dev
+            libc6-dev \
+            zip
       - name: Install Zig
         uses: mlugg/setup-zig@v2.2.1
         with:
@@ -65,6 +66,11 @@ jobs:
           install -m 0755 zig-out/bin/rpc_control \
             release-assets/rpc_control-linux-x86_64
           cd release-assets
+          zip -9 eth-mempool-monitor-linux-x86_64.zip \
+            eth_mempool_monitor-linux-x86_64 \
+            http_transmitter-linux-x86_64 \
+            rabbitmq_tx_console-linux-x86_64 \
+            rpc_control-linux-x86_64
           sha256sum ./* > SHA256SUMS
       - name: Create release and upload assets
         env:
