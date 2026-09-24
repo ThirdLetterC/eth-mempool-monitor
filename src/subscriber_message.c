@@ -415,19 +415,33 @@ ws_subscriber_decode_sismember_reply(const redisReply *reply,
       redis, set_key, members, member_count, out_member_present);
 }
 
-static void
-ws_subscriber_report_transaction_match(const char *tx_hash, const char *from,
-                                       const char *to, const char *value,
-                                       bool from_monitored, bool to_monitored) {
-  char amount_eth[APP_ETH_AMOUNT_CAPACITY] = {0};
+static void ws_subscriber_report_transaction_match(
+    const char *tx_hash, const char *from, const char *to, const char *value,
+    const char *gas, const char *gas_price, const char *fee_cap,
+    bool from_monitored, bool to_monitored) {
+  char amount_eth[APP_FORMATTED_QUANTITY_CAPACITY] = {0};
+  char gas_price_gwei[APP_FORMATTED_QUANTITY_CAPACITY] = {0};
+  char max_fee_eth[APP_FORMATTED_QUANTITY_CAPACITY] = {0};
   const char *formatted_amount =
       app_format_wei_as_eth(value, amount_eth, sizeof(amount_eth))
           ? amount_eth
           : "(unknown)";
+  const char *formatted_gas_price =
+      app_format_wei_as_gwei(gas_price, gas_price_gwei, sizeof(gas_price_gwei))
+          ? gas_price_gwei
+          : "(unknown)";
+  const char *formatted_max_fee =
+      app_format_max_fee_as_eth(gas, fee_cap, max_fee_eth, sizeof(max_fee_eth))
+          ? max_fee_eth
+          : "(unknown)";
   ulog_info("Monitored transaction: hash=%s amount_eth=%s value_wei=%s "
-            "from=%s%s to=%s%s",
+            "gas_price_gwei=%s gas_price_wei=%s max_fee_eth=%s "
+            "gas_limit=%s fee_cap_wei=%s from=%s%s to=%s%s",
             tx_hash != nullptr ? tx_hash : "(unknown)", formatted_amount,
-            value != nullptr ? value : "(unknown)",
+            value != nullptr ? value : "(unknown)", formatted_gas_price,
+            gas_price != nullptr ? gas_price : "(unknown)", formatted_max_fee,
+            gas != nullptr ? gas : "(unknown)",
+            fee_cap != nullptr ? fee_cap : "(unknown)",
             from != nullptr ? from : "(none)",
             from_monitored ? " [monitored]" : "", to != nullptr ? to : "(none)",
             to_monitored ? " [monitored]" : "");
@@ -524,6 +538,11 @@ static void ws_subscriber_handle_transaction_object(
   auto from = json_object_get_string(tx, "from");
   auto to = json_object_get_string(tx, "to");
   auto value = json_object_get_string(tx, "value");
+  auto gas = json_object_get_string(tx, "gas");
+  auto gas_price = json_object_get_string(tx, "gasPrice");
+  auto max_fee_per_gas = json_object_get_string(tx, "maxFeePerGas");
+  const char *fee_cap =
+      max_fee_per_gas != nullptr ? max_fee_per_gas : gas_price;
 
   if (runtime_config == nullptr || runtime_config->redis == nullptr ||
       runtime_config->monitored_set_key == nullptr) {
@@ -611,8 +630,9 @@ static void ws_subscriber_handle_transaction_object(
   }
 
   if ((from_checked && from_monitored) || (to_checked && to_monitored)) {
-    ws_subscriber_report_transaction_match(tx_hash, from, to, value,
-                                           from_monitored, to_monitored);
+    ws_subscriber_report_transaction_match(tx_hash, from, to, value, gas,
+                                           gas_price, fee_cap, from_monitored,
+                                           to_monitored);
     ws_subscriber_publish_transaction_match(
         tx, tx_hash, from, to, from_monitored, to_monitored, runtime_config);
   } else if (tx_hash != nullptr) {

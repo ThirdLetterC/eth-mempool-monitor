@@ -22,7 +22,8 @@ int main() {
   app_port_t converted_port = {0};
   app_seconds_t converted_seconds = {0};
   app_socket_backlog_t converted_backlog = {0};
-  char eth_amount[APP_ETH_AMOUNT_CAPACITY] = {0};
+  char eth_amount[APP_FORMATTED_QUANTITY_CAPACITY] = {0};
+  char gas_price[APP_FORMATTED_QUANTITY_CAPACITY] = {0};
 
   assert(port.value == UINT16_MAX);
   assert(seconds.value == 30);
@@ -63,5 +64,14 @@ int main() {
                 "115792089237316195423570985008687907853269984665640564039457."
                 "584007913129639935") == 0);
   assert(!app_format_wei_as_eth("0xnot-hex", eth_amount, sizeof(eth_amount)));
+  assert(app_format_wei_as_gwei("0x3b9aca00", gas_price, sizeof(gas_price)));
+  assert(strcmp(gas_price, "1") == 0);
+  assert(app_format_wei_as_gwei("0x59682f00", gas_price, sizeof(gas_price)));
+  assert(strcmp(gas_price, "1.5") == 0);
+  assert(app_format_max_fee_as_eth("0x5208", "0x3b9aca00", eth_amount,
+                                   sizeof(eth_amount)));
+  assert(strcmp(eth_amount, "0.000021") == 0);
+  assert(!app_format_max_fee_as_eth("0xffffffffffffffff", "0x2", eth_amount,
+                                    sizeof(eth_amount)));
   return 0;
 }
