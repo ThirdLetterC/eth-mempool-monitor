@@ -43,8 +43,8 @@ services:
       - --rabbitmq-host
       - rabbitmq
     cpus: "1.00"
-    mem_limit: 6m
-    mem_reservation: 6m
+    mem_limit: 128m
+    mem_reservation: 128m
   valkey:
     image: docker.io/valkey/valkey:latest
     container_name: valkey
