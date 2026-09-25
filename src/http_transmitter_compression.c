@@ -5,6 +5,10 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <zlib.h>
+#if defined(USE_MIMALLOC)
+#define ZSTD_STATIC_LINKING_ONLY
+#include <mimalloc.h>
+#endif
 #include <zstd.h>
 
 /*
@@ -12,6 +16,27 @@
  * bounded before reaching this module. Each returned buffer is owned by the
  * caller and has a size derived from the codec's checked upper-bound API.
  */
+
+#if defined(USE_MIMALLOC)
+[[nodiscard]] static void *http_zlib_allocate(void *context [[maybe_unused]],
+                                              unsigned int count,
+                                              unsigned int size) {
+  return mi_calloc((size_t)count, (size_t)size);
+}
+
+static void http_zlib_free(void *context [[maybe_unused]], void *pointer) {
+  mi_free(pointer);
+}
+
+[[nodiscard]] static void *http_codec_allocate(void *context [[maybe_unused]],
+                                               size_t size) {
+  return mi_malloc(size);
+}
+
+static void http_codec_free(void *context [[maybe_unused]], void *pointer) {
+  mi_free(pointer);
+}
+#endif
 
 [[nodiscard]] const char *
 http_transmitter_compression_name(http_compression_t compression) {
@@ -44,6 +69,10 @@ http_compress_gzip(const void *body, size_t body_length,
     return HTTP_TRANSMITTER_STATUS_INVALID_CONFIG;
   }
   z_stream stream = {0};
+#if defined(USE_MIMALLOC)
+  stream.zalloc = http_zlib_allocate;
+  stream.zfree = http_zlib_free;
+#endif
   int status = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
                             MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY);
   if (status != Z_OK) {
@@ -90,14 +119,39 @@ http_compress_brotli(const void *body, size_t body_length,
   if (output == nullptr) {
     return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
   }
-  BROTLI_BOOL ok = BrotliEncoderCompress(
-      BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW, BROTLI_MODE_TEXT,
-      body_length, body, &output_length, output);
+  BrotliEncoderState *encoder = BrotliEncoderCreateInstance(
+#if defined(USE_MIMALLOC)
+      http_codec_allocate, http_codec_free, nullptr
+#else
+      nullptr, nullptr, nullptr
+#endif
+  );
+  if (encoder == nullptr) {
+    free(output);
+    return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
+  }
+  const uint8_t *next_input = body;
+  size_t available_input = body_length;
+  uint8_t *next_output = output;
+  size_t available_output = output_length;
+  size_t total_output = 0;
+  BROTLI_BOOL ok = BrotliEncoderSetParameter(encoder, BROTLI_PARAM_QUALITY,
+                                             BROTLI_DEFAULT_QUALITY);
+  ok = ok && BrotliEncoderSetParameter(encoder, BROTLI_PARAM_LGWIN,
+                                       BROTLI_DEFAULT_WINDOW);
+  ok = ok &&
+       BrotliEncoderSetParameter(encoder, BROTLI_PARAM_MODE, BROTLI_MODE_TEXT);
+  ok = ok && BrotliEncoderCompressStream(
+                 encoder, BROTLI_OPERATION_FINISH, &available_input,
+                 &next_input, &available_output, &next_output, &total_output);
+  ok = ok && BrotliEncoderIsFinished(encoder);
+  BrotliEncoderDestroyInstance(encoder);
   if (ok == BROTLI_FALSE) {
     free(output);
     ulog_error("Unable to Brotli-compress webhook payload");
     return HTTP_TRANSMITTER_STATUS_PROTOCOL_ERROR;
   }
+  output_length = total_output;
   *payload = (http_compressed_payload_t){
       .data = output,
       .length = output_length,
@@ -116,8 +170,25 @@ http_compress_zstd(const void *body, size_t body_length,
   if (output == nullptr) {
     return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
   }
-  size_t output_length = ZSTD_compress(output, output_capacity, body,
-                                       body_length, ZSTD_CLEVEL_DEFAULT);
+  size_t output_length = 0;
+#if defined(USE_MIMALLOC)
+  ZSTD_customMem allocator = {
+      .customAlloc = http_codec_allocate,
+      .customFree = http_codec_free,
+      .opaque = nullptr,
+  };
+  ZSTD_CCtx *context = ZSTD_createCCtx_advanced(allocator);
+  if (context == nullptr) {
+    free(output);
+    return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
+  }
+  output_length = ZSTD_compressCCtx(context, output, output_capacity, body,
+                                    body_length, ZSTD_CLEVEL_DEFAULT);
+  (void)ZSTD_freeCCtx(context);
+#else
+  output_length = ZSTD_compress(output, output_capacity, body, body_length,
+                                ZSTD_CLEVEL_DEFAULT);
+#endif
   if (ZSTD_isError(output_length) != 0) {
     ulog_error("Unable to Zstandard-compress webhook payload: %s",
                ZSTD_getErrorName(output_length));

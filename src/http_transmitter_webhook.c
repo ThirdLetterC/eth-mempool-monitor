@@ -4,16 +4,38 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdckdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#if defined(USE_MIMALLOC)
+#include <mimalloc.h>
+#endif
 
 typedef enum http_payload_validation : uint8_t {
   HTTP_PAYLOAD_VALID = 0,
   HTTP_PAYLOAD_INVALID,
   HTTP_PAYLOAD_VALIDATION_ERROR,
 } http_payload_validation_t;
+
+static pthread_once_t http_curl_init_once = PTHREAD_ONCE_INIT;
+static CURLcode http_curl_init_status = CURLE_FAILED_INIT;
+
+static void http_curl_global_init_once() {
+#if defined(USE_MIMALLOC)
+  http_curl_init_status =
+      curl_global_init_mem(CURL_GLOBAL_DEFAULT, mi_malloc, mi_free, mi_realloc,
+                           mi_strdup, mi_calloc);
+#else
+  http_curl_init_status = curl_global_init(CURL_GLOBAL_DEFAULT);
+#endif
+  if (http_curl_init_status == CURLE_OK && atexit(curl_global_cleanup) != 0) {
+    curl_global_cleanup();
+    http_curl_init_status = CURLE_FAILED_INIT;
+  }
+}
 
 [[nodiscard]] static size_t http_discard_response(char *data, size_t size,
                                                   size_t count, void *context) {
@@ -131,15 +153,14 @@ http_webhook_client_init(http_webhook_client_t *client,
     return HTTP_TRANSMITTER_STATUS_INVALID_CONFIG;
   }
   *client = (http_webhook_client_t){.config = config};
-  CURLcode status = curl_global_init(CURL_GLOBAL_DEFAULT);
-  if (status != CURLE_OK) {
+  if (pthread_once(&http_curl_init_once, http_curl_global_init_once) != 0 ||
+      http_curl_init_status != CURLE_OK) {
     ulog_error("libcurl global initialization failed: %s",
-               curl_easy_strerror(status));
+               curl_easy_strerror(http_curl_init_status));
     return HTTP_TRANSMITTER_STATUS_CURL_ERROR;
   }
   client->easy = curl_easy_init();
   if (client->easy == nullptr) {
-    curl_global_cleanup();
     return HTTP_TRANSMITTER_STATUS_ALLOCATION_FAILED;
   }
   if (!http_append_header(client, "Content-Type: application/json")) {
@@ -172,7 +193,6 @@ void http_webhook_client_cleanup(http_webhook_client_t *client) {
     curl_slist_free_all(client->headers);
   }
   *client = (http_webhook_client_t){0};
-  curl_global_cleanup();
 }
 
 [[nodiscard]] static CURLcode

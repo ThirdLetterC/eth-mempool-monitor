@@ -6,6 +6,8 @@
 #include <string.h>
 #if defined(USE_MIMALLOC)
 #include <mimalloc.h>
+#include <wolfssl/options.h>
+#include <wolfssl/wolfcrypt/memory.h>
 
 #include "parson/parson.h"
 #include "toml/toml.h"
@@ -25,14 +27,18 @@ static void app_handle_shutdown_signal(int signal_number) {
   app_shutdown_signal = signal_number;
 }
 
-static void app_configure_allocator_overrides() {
+[[nodiscard]] static bool app_configure_allocator_overrides() {
 #if defined(USE_MIMALLOC)
   toml_option_t toml_options = toml_default_option();
   toml_options.mem_realloc = mi_realloc;
   toml_options.mem_free = mi_free;
   toml_set_option(toml_options);
   json_set_allocation_functions(mi_malloc, mi_free);
+  if (wolfSSL_SetAllocators(mi_malloc, mi_free, mi_realloc) != 0) {
+    return false;
+  }
 #endif
+  return true;
 }
 
 [[nodiscard]] bool app_is_shutdown_requested() {
@@ -71,7 +77,9 @@ static void app_configure_allocator_overrides() {
 }
 
 int main(int argc, char *argv[]) {
-  app_configure_allocator_overrides();
+  if (!app_configure_allocator_overrides()) {
+    return EXIT_FAILURE;
+  }
 
   if (!app_apply_log_style_defaults()) {
     (void)ulog_cleanup();

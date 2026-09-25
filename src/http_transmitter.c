@@ -10,6 +10,8 @@
 #include "parson/parson.h"
 #include "toml/toml.h"
 #include <mimalloc.h>
+#include <wolfssl/options.h>
+#include <wolfssl/wolfcrypt/memory.h>
 #endif
 
 volatile sig_atomic_t http_transmitter_shutdown_signal = 0;
@@ -22,14 +24,18 @@ static void http_transmitter_handle_signal(int signal_number) {
   return http_transmitter_shutdown_signal != 0;
 }
 
-static void http_transmitter_configure_allocators() {
+[[nodiscard]] static bool http_transmitter_configure_allocators() {
 #if defined(USE_MIMALLOC)
   toml_option_t options = toml_default_option();
   options.mem_realloc = mi_realloc;
   options.mem_free = mi_free;
   toml_set_option(options);
   json_set_allocation_functions(mi_malloc, mi_free);
+  if (wolfSSL_SetAllocators(mi_malloc, mi_free, mi_realloc) != 0) {
+    return false;
+  }
 #endif
+  return true;
 }
 
 [[nodiscard]] static bool http_transmitter_install_signal_handlers() {
@@ -46,7 +52,9 @@ static void http_transmitter_configure_allocators() {
 }
 
 int main(int argc, char *argv[]) {
-  http_transmitter_configure_allocators();
+  if (!http_transmitter_configure_allocators()) {
+    return EXIT_FAILURE;
+  }
   if (!http_transmitter_apply_log_style_defaults()) {
     return EXIT_FAILURE;
   }

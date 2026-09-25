@@ -42,7 +42,7 @@ struct rpc_control_cli_overrides {
   bool show_help;
 };
 
-void rpc_control_configure_allocator_overrides();
+[[nodiscard]] bool rpc_control_configure_allocator_overrides();
 void rpc_control_print_usage(const char *program_name);
 void rpc_control_config_set_defaults(rpc_control_config_t *config);
 void rpc_control_config_cleanup(rpc_control_config_t *config);

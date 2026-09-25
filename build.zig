@@ -593,22 +593,39 @@ fn createWolfSslLibrary(
 fn createCodecLibrary(
     b: *std.Build,
     dependency: *std.Build.Dependency,
+    mimalloc_dependency: ?*std.Build.Dependency,
     name: []const u8,
     files: []const []const u8,
     include_path: []const u8,
     flags: []const []const u8,
     target: std.Build.ResolvedTarget,
 ) *std.Build.Step.Compile {
+    const codec_flags = if (mimalloc_dependency != null)
+        makeCFlags(
+            b,
+            flags,
+            &.{
+                "-DUSE_MIMALLOC=1",
+                "-includeapp/vendor_allocator_override.h",
+            },
+            false,
+        )
+    else
+        flags;
     const module = b.createModule(.{
         .target = target,
         .optimize = .ReleaseFast,
         .link_libc = true,
     });
+    module.addIncludePath(b.path("include"));
     module.addIncludePath(dependency.path(include_path));
+    if (mimalloc_dependency) |allocator_dependency| {
+        module.addIncludePath(allocator_dependency.path("include"));
+    }
     module.addCSourceFiles(.{
         .root = dependency.path("."),
         .files = files,
-        .flags = flags,
+        .flags = codec_flags,
     });
     return b.addLibrary(.{
         .name = name,
@@ -739,6 +756,7 @@ pub fn build(b: *std.Build) void {
     const zlib_library = createCodecLibrary(
         b,
         zlib_dependency,
+        mimalloc_dependency,
         "z",
         &zlib_files,
         ".",
@@ -748,6 +766,7 @@ pub fn build(b: *std.Build) void {
     const brotli_library = createCodecLibrary(
         b,
         brotli_dependency,
+        mimalloc_dependency,
         "brotli",
         &brotli_files,
         "c/include",
@@ -757,6 +776,7 @@ pub fn build(b: *std.Build) void {
     const zstd_library = createCodecLibrary(
         b,
         zstd_dependency,
+        mimalloc_dependency,
         "zstd",
         &zstd_files,
         "lib",
@@ -791,11 +811,6 @@ pub fn build(b: *std.Build) void {
         &[_][]const u8{"-DHIREDIS_USE_MIMALLOC=1"}
     else
         no_component_flags;
-    const jsonrpc_component_flags = if (use_mimalloc)
-        &[_][]const u8{"-DUSE_MIMALLOC=1"}
-    else
-        no_component_flags;
-
     const c_flags = makeCFlags(b, &strict_c_flags, c_component_flags, enable_hardening);
     const project_c_flags = makeCFlags(
         b,
@@ -809,10 +824,18 @@ pub fn build(b: *std.Build) void {
         project_posix_component_flags,
         enable_hardening,
     );
+    const ulog_component_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-DULOG_BUILD_DYNAMIC_CONFIG=1",
+            "-DUSE_MIMALLOC=1",
+            "-includeapp/vendor_allocator_override.h",
+        }
+    else
+        &[_][]const u8{"-DULOG_BUILD_DYNAMIC_CONFIG=1"};
     const ulog_c_flags = makeCFlags(
         b,
         &strict_c_flags,
-        &.{"-DULOG_BUILD_DYNAMIC_CONFIG=1"},
+        ulog_component_flags,
         enable_hardening,
     );
     const hiredis_c_flags = makeCFlags(
@@ -821,16 +844,37 @@ pub fn build(b: *std.Build) void {
         hiredis_component_flags,
         enable_hardening,
     );
+    const rabbitmq_component_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-DHAVE_POLL",
+            "-DHAVE_WOLFSSL_SSL_H",
+            "-DWC_NO_HARDEN",
+            "-DUSE_MIMALLOC=1",
+            "-includeapp/vendor_allocator_override.h",
+        }
+    else
+        &[_][]const u8{
+            "-DHAVE_POLL",
+            "-DHAVE_WOLFSSL_SSL_H",
+            "-DWC_NO_HARDEN",
+        };
     const rabbitmq_c_flags = makeCFlags(
         b,
         &posix_c_flags,
-        &.{ "-DHAVE_POLL", "-DHAVE_WOLFSSL_SSL_H", "-DWC_NO_HARDEN" },
+        rabbitmq_component_flags,
         enable_hardening,
     );
+    const jsonrpc_vendor_flags = if (use_mimalloc)
+        &[_][]const u8{
+            "-DUSE_MIMALLOC=1",
+            "-includeapp/vendor_allocator_override.h",
+        }
+    else
+        no_component_flags;
     const jsonrpc_c_flags = makeCFlags(
         b,
         &posix_c_flags,
-        jsonrpc_component_flags,
+        jsonrpc_vendor_flags,
         enable_hardening,
     );
 
@@ -905,8 +949,12 @@ pub fn build(b: *std.Build) void {
         project_c_flags,
     );
     addCFiles(b, type_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    if (mimalloc_dependency) |dependency| {
+        type_test_module.addIncludePath(dependency.path("include"));
+    }
     type_test_module.linkLibrary(websocket_library);
     type_test_module.linkLibrary(wolfssl_library);
+    linkOptionalLibrary(type_test_module, mimalloc_library);
     const type_test = b.addExecutable(.{
         .name = "type_safety_test",
         .root_module = type_test_module,
@@ -930,9 +978,13 @@ pub fn build(b: *std.Build) void {
         "src/http_transmitter_config.c",
     }, project_posix_c_flags);
     addCFiles(b, http_config_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    if (mimalloc_dependency) |dependency| {
+        http_config_test_module.addIncludePath(dependency.path("include"));
+    }
     http_config_test_module.addIncludePath(curl_dependency.path("include"));
     http_config_test_module.linkLibrary(curl_library);
     http_config_test_module.linkLibrary(wolfssl_library);
+    linkOptionalLibrary(http_config_test_module, mimalloc_library);
     const http_config_test = b.addExecutable(.{
         .name = "http_transmitter_config_test",
         .root_module = http_config_test_module,
@@ -956,6 +1008,9 @@ pub fn build(b: *std.Build) void {
         "src/http_transmitter_webhook.c",
     }, project_posix_c_flags);
     addCFiles(b, http_webhook_test_module, &.{"src/ulog.c"}, ulog_c_flags);
+    if (mimalloc_dependency) |dependency| {
+        http_webhook_test_module.addIncludePath(dependency.path("include"));
+    }
     http_webhook_test_module.addIncludePath(curl_dependency.path("include"));
     http_webhook_test_module.addIncludePath(zlib_dependency.path("."));
     http_webhook_test_module.addIncludePath(brotli_dependency.path("c/include"));
@@ -965,6 +1020,7 @@ pub fn build(b: *std.Build) void {
     http_webhook_test_module.linkLibrary(zlib_library);
     http_webhook_test_module.linkLibrary(brotli_library);
     http_webhook_test_module.linkLibrary(zstd_library);
+    linkOptionalLibrary(http_webhook_test_module, mimalloc_library);
     const http_webhook_test = b.addExecutable(.{
         .name = "http_transmitter_webhook_test",
         .root_module = http_webhook_test_module,
@@ -989,9 +1045,9 @@ pub fn build(b: *std.Build) void {
     addCFiles(b, monitor_module, &.{
         "src/subscriber.c",
         "src/subscriber_message.c",
-        "src/main.c",
     }, project_c_flags);
     addCFiles(b, monitor_module, &.{
+        "src/main.c",
         "src/monitor_config.c",
         "src/monitor_runtime.c",
         "src/rabbitmq_publisher.c",

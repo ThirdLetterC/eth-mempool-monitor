@@ -26,7 +26,9 @@ static void rpc_control_on_signal(uv_signal_t *handle, int signum) {
 }
 
 int main(int argc, char **argv) {
-  rpc_control_configure_allocator_overrides();
+  if (!rpc_control_configure_allocator_overrides()) {
+    return EXIT_FAILURE;
+  }
 
   if (!rpc_control_apply_log_style_defaults()) {
     (void)ulog_cleanup();

@@ -15,7 +15,9 @@
 #include "ulog/ulog.h"
 
 #if defined(USE_MIMALLOC)
+#include "hiredis/alloc.h"
 #include <mimalloc.h>
+#include <uv.h>
 #endif
 
 /*
@@ -46,7 +48,7 @@ static const char *const RPC_CONTROL_METHOD_NAMES[] = {
     "monitor_clear",
 };
 
-void rpc_control_configure_allocator_overrides() {
+[[nodiscard]] bool rpc_control_configure_allocator_overrides() {
 #if defined(USE_MIMALLOC)
   /* TOML allocates through realloc(nullptr, size), so both callbacks must
    * belong to the same allocator family. */
@@ -54,7 +56,20 @@ void rpc_control_configure_allocator_overrides() {
   toml_options.mem_realloc = mi_realloc;
   toml_options.mem_free = mi_free;
   toml_set_option(toml_options);
+
+  hiredisAllocFuncs hiredis_allocators = {
+      .mallocFn = mi_malloc,
+      .callocFn = mi_calloc,
+      .reallocFn = mi_realloc,
+      .strdupFn = mi_strdup,
+      .freeFn = mi_free,
+  };
+  (void)hiredisSetAllocators(&hiredis_allocators);
+  if (uv_replace_allocator(mi_malloc, mi_realloc, mi_calloc, mi_free) != 0) {
+    return false;
+  }
 #endif
+  return true;
 }
 
 void rpc_control_print_usage(const char *program_name) {

@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file. Release dates
 and links are based on the published [GitHub releases][releases]; change details
 are summarized from the commits contained in each tagged release.
 
+## [v1.2.7] - 2026-09-25
+
+### Changed
+
+- Configured mimalloc explicitly across application code and all allocating
+  vendor libraries when the `mimalloc` build option is enabled.
+- Added native allocator integration for libuv, wolfSSL, Hiredis, TOML,
+  Parson, curl, zlib, Brotli, and Zstandard, with isolated allocator shims for
+  bundled libraries that do not expose allocator hooks.
+- Made curl global initialization process-wide and thread-safe.
+
 ## [v1.2.6] - 2026-09-24
 
 ### Added
@@ -160,3 +171,4 @@ are summarized from the commits contained in each tagged release.
 [v1.2.4]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.4
 [v1.2.5]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.5
 [v1.2.6]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.6
+[v1.2.7]: https://github.com/ThirdLetterC/eth-mempool-monitor/releases/tag/v1.2.7
