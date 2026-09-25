@@ -20,8 +20,8 @@ services:
     ports:
       - "8080:8080"
     cpus: "0.50"
-    mem_limit: 6m
-    mem_reservation: 6m
+    mem_limit: 16m
+    mem_reservation: 16m
   eth_mempool_monitor:
     image: eth-mempool-monitor:latest
     container_name: eth_mempool_monitor
